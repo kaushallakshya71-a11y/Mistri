@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Database files (do not commit live DB)
+backend/db/mistri.db
+backend/db/*.db-shm
+backend/db/*.db-wal
+
+# Environment secrets
+.env
+backend/.env
+
+# Uploaded user files
+backend/uploads/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# PDF generated files
+*.pdf
+
+# Logs
+*.log

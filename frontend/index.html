@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mistri – Electrical Appliance Repair Management</title>
+    <meta name="description"
+        content="Mistri is a smart repair management platform for electrical appliance shops. Track fan, cooler, mixer, motor, geyser & pump repairs with AI cost estimates.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css?v=2">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+
+<body>
+    <!-- App Shell -->
+    <div id="app">
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="loading-screen">
+            <div class="loading-logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">Mistri</span>
+            </div>
+            <div class="loading-bar">
+                <div class="loading-bar-fill"></div>
+            </div>
+        </div>
+
+        <!-- Navbar -->
+        <nav class="navbar" id="navbar" style="display:none">
+            <div class="navbar-brand">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">Mistri</span>
+            </div>
+            <div class="navbar-links" id="navbar-links"></div>
+            <div class="navbar-actions">
+                <button class="notif-btn" id="notif-btn" title="Notifications">
+                    🔔 <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+                </button>
+                <button class="theme-btn" id="theme-btn" title="Toggle theme">🌙</button>
+                <div class="user-menu">
+                    <div class="user-avatar" id="user-avatar">A</div>
+                    <div class="user-dropdown" id="user-dropdown">
+                        <div class="dropdown-name" id="dropdown-name"></div>
+                        <div class="dropdown-role" id="dropdown-role"></div>
+                        <hr>
+                        <button onclick="logout()">🚪 Logout</button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Notifications Panel -->
+        <div class="notif-panel" id="notif-panel" style="display:none">
+            <div class="notif-panel-header">
+                <h3>Notifications</h3>
+                <button onclick="markAllRead()">Mark all read</button>
+            </div>
+            <div id="notif-list"></div>
+        </div>
+        <div class="notif-overlay" id="notif-overlay" onclick="closeNotifPanel()" style="display:none"></div>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="main-content">
+            <!-- Views injected by JS router -->
+        </main>
+
+        <!-- Toast notifications -->
+        <div id="toast-container"></div>
+    </div>
+
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/router.js"></script>
+    <script src="/static/js/views/auth.js"></script>
+    <script src="/static/js/views/customer.js"></script>
+    <script src="/static/js/views/admin.js"></script>
+    <script src="/static/js/views/staff.js"></script>
+    <script src="/static/js/views/shop.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+
+</html>

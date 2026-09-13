@@ -1,0 +1,317 @@
+/**
+ * Mistri Auth Views - Landing, Login, Register
+ * New Design: Split panel login with Google button + appliance images
+ */
+
+/** Landing Page */
+function renderLandingPage() {
+    const user = api.getUser();
+    if (user) {
+        router.redirectByRole(user.role);
+        return;
+    }
+    document.getElementById('navbar').style.display = 'none';
+    setContent(`
+        <div class="landing-hero">
+            <div class="hero-badge">⚡ AI-Powered Electrical Appliance Repair</div>
+            <h1 class="hero-title">Fix It Faster with <span>Mistri</span></h1>
+            <p class="hero-desc">The complete management platform for electrical appliance repair shops. Track fan, cooler, mixer, motor, geyser & pump repairs — all in one smart dashboard.</p>
+            <div class="hero-cta">
+                <button class="btn btn-primary" onclick="router.navigate('/register')" style="font-size:1rem;padding:14px 32px">🚀 Get Started Free</button>
+                <button class="btn btn-outline" onclick="router.navigate('/login')" style="font-size:1rem;padding:14px 32px">🔑 Login</button>
+            </div>
+
+            <!-- Appliance + Technician Images -->
+            <div class="hero-img-row">
+                <img src="/static/img/appliances_hero.png" alt="Electrical Appliances" class="hero-img-appliances">
+                <img src="/static/img/technician.png" alt="Expert Technician" class="hero-img-technician">
+            </div>
+
+            <div class="hero-features">
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <div class="feature-title">AI Cost Estimator</div>
+                    <div class="feature-desc">Get instant repair cost estimates for fans, coolers, motors & more using our smart AI before the customer even drops off the appliance.</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📍</div>
+                    <div class="feature-title">Real-Time Tracking</div>
+                    <div class="feature-desc">Track repair status with a unique QR code. From Received to Delivered — always stay updated via SMS or app.</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <div class="feature-title">Analytics Dashboard</div>
+                    <div class="feature-desc">Property admin analytics with revenue charts, technician performance, and spare parts inventory insights.</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📄</div>
+                    <div class="feature-title">Auto PDF Invoices</div>
+                    <div class="feature-desc">Generate professional PDF invoices instantly. Track payments and export reports in CSV.</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📦</div>
+                    <div class="feature-title">Spare Parts Inventory</div>
+                    <div class="feature-desc">Track capacitors, coils, motors, brushes — get low-stock alerts and manage suppliers effortlessly.</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">👥</div>
+                    <div class="feature-title">Multi-Role Access</div>
+                    <div class="feature-desc">Separate dashboards for Admin, Technician, and Customer with secure role-based permissions.</div>
+                </div>
+            </div>
+            <div style="margin-top:48px;text-align:center;color:var(--text-muted);font-size:0.85rem">
+                <div style="margin-bottom:8px;font-weight:600">Demo Login Credentials</div>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center">
+                    <span>🔴 <b>Admin:</b> admin@mistri.com / Admin@123</span>
+                    <span>🟡 <b>Staff:</b> raju@mistri.com / Staff@123</span>
+                    <span>🟢 <b>Customer:</b> arun@example.com / Customer@123</span>
+                </div>
+            </div>
+        </div>
+    `);
+}
+
+/** Login Page — New Split Panel Design with Google Button */
+function renderLogin() {
+    document.getElementById('navbar').style.display = 'none';
+    setContent(`
+        <div class="auth-page">
+            <!-- Left Panel: Branding + Image -->
+            <div class="auth-left">
+                <div class="auth-left-content">
+                    <div class="auth-brand">
+                        <span class="auth-brand-icon">⚡</span>
+                        <span class="auth-brand-name">Mistri</span>
+                    </div>
+                    <img src="/static/img/appliances_hero.png" alt="Electrical Appliances" class="auth-hero-img">
+                    <div class="auth-tagline">Your <span>Electrical Repair</span><br>Business, Supercharged</div>
+                    <div class="auth-tagline-sub">Manage fan, cooler, mixer, motor & geyser repairs with AI-powered cost estimates and real-time tracking.</div>
+                    <div class="auth-appliance-pills">
+                        <span class="appliance-pill">🌀 Fan Repair</span>
+                        <span class="appliance-pill">❄️ Cooler</span>
+                        <span class="appliance-pill">🥤 Mixer/Grinder</span>
+                        <span class="appliance-pill">⚙️ Motor</span>
+                        <span class="appliance-pill">🔥 Geyser</span>
+                        <span class="appliance-pill">💧 Pump</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Login Form -->
+            <div class="auth-right">
+                <div class="auth-card">
+                    <div class="auth-title">Welcome Back 👋</div>
+                    <div class="auth-sub">Sign in to your Mistri account</div>
+
+                    <!-- Gmail / Google Button -->
+                    <button class="btn btn-google" onclick="handleGoogleLogin()" id="google-btn">
+                        <span class="google-icon"></span>
+                        Continue with Gmail
+                    </button>
+
+                    <div class="auth-divider">or sign in with email</div>
+
+                    <form id="login-form" onsubmit="handleLogin(event)">
+                        <div class="form-group">
+                            <label class="form-label">Email Address</label>
+                            <input type="email" class="form-control" id="login-email" placeholder="you@gmail.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" id="login-password" placeholder="••••••••" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-full" id="login-btn" style="margin-top:8px">
+                            🔑 Sign In
+                        </button>
+                    </form>
+
+                    <div class="auth-switch" style="margin-top:16px">
+                        Don't have an account? <a onclick="router.navigate('/register')">Register here</a>
+                    </div>
+                    <div class="auth-switch" style="margin-top:6px">
+                        <a onclick="router.navigate('/')">← Back to home</a>
+                    </div>
+
+                    <div class="divider"></div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);text-align:center">
+                        <div style="font-weight:600;margin-bottom:6px">⚡ Quick Demo Login</div>
+                        <div style="display:flex;flex-direction:column;gap:5px">
+                            <a onclick="quickLogin('admin@mistri.com','Admin@123')" style="cursor:pointer;color:var(--danger)">🔴 Login as Admin</a>
+                            <a onclick="quickLogin('raju@mistri.com','Staff@123')" style="cursor:pointer;color:var(--warning)">🟡 Login as Staff</a>
+                            <a onclick="quickLogin('arun@example.com','Customer@123')" style="cursor:pointer;color:var(--success)">🟢 Login as Customer</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `);
+}
+
+async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+    btn.innerHTML = '<div class="spinner"></div> Signing in...';
+    btn.disabled = true;
+    try {
+        const res = await api.login(email, password);
+        showToast(`Welcome back, ${res.name}! 👋`, 'success');
+        router.redirectByRole(res.role);
+    } catch (err) {
+        showToast(err.message, 'error');
+        btn.innerHTML = '🔑 Sign In';
+        btn.disabled = false;
+    }
+}
+
+async function quickLogin(email, password) {
+    document.getElementById('login-email').value = email;
+    document.getElementById('login-password').value = password;
+    const btn = document.getElementById('login-btn');
+    btn.click();
+}
+
+function handleGoogleLogin() {
+    // Show a toast explaining Gmail login is a UI demo (would need OAuth backend in production)
+    showToast('Gmail login coming soon! Please use email & password for now.', 'info');
+}
+
+/** Register Page */
+function renderRegister() {
+    document.getElementById('navbar').style.display = 'none';
+    setContent(`
+        <div class="auth-page">
+            <!-- Left Panel -->
+            <div class="auth-left">
+                <div class="auth-left-content">
+                    <div class="auth-brand">
+                        <span class="auth-brand-icon">⚡</span>
+                        <span class="auth-brand-name">Mistri</span>
+                    </div>
+                    <img src="/static/img/technician.png" alt="Expert Technician" class="auth-hero-img" style="height:280px;object-fit:cover;object-position:top">
+                    <div class="auth-tagline">Join <span>Thousands</span> of<br>Repair Shops</div>
+                    <div class="auth-tagline-sub">Create your free account and start managing electrical appliance repairs smarter today.</div>
+                    <div class="auth-appliance-pills">
+                        <span class="appliance-pill">✅ Free Forever</span>
+                        <span class="appliance-pill">🤖 AI Estimates</span>
+                        <span class="appliance-pill">📊 Analytics</span>
+                        <span class="appliance-pill">📄 PDF Invoices</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Register Form -->
+            <div class="auth-right">
+                <div class="auth-card">
+                    <div class="auth-title">Create Account 🚀</div>
+                    <div class="auth-sub">Join Mistri to manage your repair shop</div>
+
+                    <!-- Gmail / Google Button -->
+                    <button class="btn btn-google" onclick="handleGoogleLogin()" id="google-reg-btn">
+                        <span class="google-icon"></span>
+                        Sign up with Gmail
+                    </button>
+
+                    <div class="auth-divider">or register with email</div>
+
+                    <form id="register-form" onsubmit="handleRegister(event)">
+                        <div class="form-group">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" class="form-control" id="reg-name" placeholder="Ramesh Kumar" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Email Address</label>
+                                <input type="email" class="form-control" id="reg-email" placeholder="you@gmail.com" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Phone</label>
+                                <input type="tel" class="form-control" id="reg-phone" placeholder="+91 98000 00000">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" id="reg-password" placeholder="Min 6 characters" required minlength="6">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-full" id="register-btn" style="margin-top:8px">
+                            🚀 Create Account
+                        </button>
+                    </form>
+
+                    <div class="auth-switch" style="margin-top:16px">
+                        Already have an account? <a onclick="router.navigate('/login')">Sign in</a>
+                    </div>
+                    <div class="auth-switch" style="margin-top:6px">
+                        <a onclick="router.navigate('/')">← Back to home</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `);
+}
+
+async function handleRegister(e) {
+    e.preventDefault();
+    const btn = document.getElementById('register-btn');
+    btn.innerHTML = '<div class="spinner"></div> Creating account...';
+    btn.disabled = true;
+    try {
+        const data = {
+            name: document.getElementById('reg-name').value,
+            email: document.getElementById('reg-email').value,
+            phone: document.getElementById('reg-phone').value,
+            password: document.getElementById('reg-password').value,
+            role: 'customer'
+        };
+        const res = await api.register(data);
+        showToast(`Account created! Welcome, ${res.name}! 🎉`, 'success');
+        router.navigate('/customer');
+    } catch (err) {
+        showToast(err.message, 'error');
+        btn.innerHTML = '🚀 Create Account';
+        btn.disabled = false;
+    }
+}
+
+/** Public Repair Tracker */
+async function renderRepairTracker(path) {
+    const repairId = path.split('/track/')[1];
+    document.getElementById('navbar').style.display = 'none';
+    setContent(`<div class="page"><div class="spinner" style="margin:48px auto;width:48px;height:48px;border-width:4px;display:block"></div></div>`);
+    try {
+        const job = await api.get(`/repairs/track/${repairId}`);
+        setContent(`
+            <div class="page" style="max-width:600px;margin:0 auto">
+                <div style="text-align:center;margin-bottom:32px">
+                    <div class="logo-icon" style="font-size:3rem">⚡</div>
+                    <div class="logo-text" style="font-family:'Space Grotesk',sans-serif;font-size:1.8rem;font-weight:700">Mistri</div>
+                    <div class="text-muted" style="margin-top:4px">Appliance Repair Tracking</div>
+                </div>
+                <div class="card card-glow">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="font-mono text-primary-color" style="font-size:1.1rem;font-weight:700">${job.repair_id}</span>
+                        ${statusBadge(job.status)}
+                    </div>
+                    <h2 style="font-size:1.2rem;margin-bottom:4px">${job.brand} ${job.model}</h2>
+                    <div class="text-muted" style="font-size:0.85rem;margin-bottom:16px">${job.device_type} · Customer: ${job.customer_name}</div>
+                    <div class="text-secondary" style="font-size:0.9rem;margin-bottom:20px">🔍 Issue: ${job.problem_description}</div>
+                    ${renderTimeline(job.status)}
+                    ${job.technician_notes ? `
+                        <div style="margin-top:16px;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm)">
+                            <div style="font-size:0.75rem;color:var(--text-muted)">Technician Notes</div>
+                            <div style="font-size:0.875rem;margin-top:4px">${job.technician_notes}</div>
+                        </div>
+                    ` : ''}
+                    ${job.estimated_cost ? `<div style="margin-top:16px;font-size:0.85rem">Estimated Cost: <strong>${formatCurrency(job.estimated_cost)}</strong></div>` : ''}
+                    <div style="margin-top:16px;font-size:0.75rem;color:var(--text-muted)">Submitted: ${formatDate(job.created_at)}</div>
+                </div>
+                <div style="text-align:center;margin-top:24px">
+                    <button class="btn btn-outline" onclick="router.navigate('/login')">🔑 Login to Mistri</button>
+                </div>
+            </div>
+        `);
+    } catch (e) {
+        setContent(`<div class="page"><div class="empty-state"><div class="empty-state-icon">❌</div><div class="empty-state-title">Repair not found</div><div class="text-muted">Check the repair ID and try again.</div></div></div>`);
+    }
+}
