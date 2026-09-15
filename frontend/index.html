@@ -73,15 +73,29 @@
         <div id="toast-container"></div>
     </div>
 
-    <script src="/static/js/i18n.js"></script>
-    <script src="/static/js/api.js"></script>
-    <script src="/static/js/router.js"></script>
-    <script src="/static/js/views/auth.js"></script>
-    <script src="/static/js/views/customer.js"></script>
-    <script src="/static/js/views/admin.js"></script>
-    <script src="/static/js/views/staff.js"></script>
-    <script src="/static/js/views/shop.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/i18n.js?v=4"></script>
+    <script src="/static/js/api.js?v=4"></script>
+    <script src="/static/js/router.js?v=4"></script>
+    <script src="/static/js/views/auth.js?v=4"></script>
+    <script src="/static/js/views/customer.js?v=4"></script>
+    <script src="/static/js/views/admin.js?v=4"></script>
+    <script src="/static/js/views/staff.js?v=4"></script>
+    <script src="/static/js/views/shop.js?v=4"></script>
+    <script src="/static/js/app.js?v=4"></script>
+    <script>
+        // Inline safety fallback: guarantees loading screen removal regardless of network caching
+        setTimeout(function() {
+            var loader = document.getElementById('loading-screen');
+            if (loader) {
+                loader.style.opacity = '0';
+                loader.style.transition = 'opacity 0.3s ease';
+                setTimeout(function() { if (loader && loader.parentNode) loader.remove(); }, 300);
+            }
+            if (window.router && typeof window.router.start === 'function') {
+                try { window.router.start(); } catch (e) { console.error(e); }
+            }
+        }, 1000);
+    </script>
 </body>
 
 </html>
