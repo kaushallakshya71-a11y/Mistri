@@ -208,6 +208,9 @@ async function renderAdminRepairs() {
                                     <td>
                                         <div style="font-weight:500">${j.customer_name}</div>
                                         <div style="font-size:0.75rem;color:var(--text-muted)">${j.customer_phone || ''}</div>
+                                        <span class="badge" style="font-size:0.65rem;padding:2px 5px;background:${j.service_type === 'Home Pickup' ? '#8b5cf622' : '#0ea5e922'};color:${j.service_type === 'Home Pickup' ? '#a78bfa' : '#38bdf8'}">
+                                            ${j.service_type === 'Home Pickup' ? '🏠 Home Visit' : '🏪 Store'}
+                                        </span>
                                     </td>
                                     <td>${j.device_type}<br><span style="font-size:0.8rem;color:var(--text-muted)">${j.brand} ${j.model}</span></td>
                                     <td style="max-width:180px;font-size:0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${j.problem_description}</td>
@@ -411,10 +414,20 @@ async function renderAdminRepairDetail(jobId) {
                 <!-- Customer and Technician info -->
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
                     <div class="card">
-                        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;font-weight:700">CUSTOMER DETAILS</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;font-weight:700">CUSTOMER & SERVICE MODE</div>
                         <div style="font-weight:600">${job.customer_name}</div>
-                        <div style="font-size:0.85rem">${job.customer_phone || 'No phone'}</div>
-                        <div style="font-size:0.85rem">${job.customer_email || ''}</div>
+                        <div style="font-size:0.85rem">${job.customer_phone || 'No phone'} · ${job.customer_email || ''}</div>
+                        <div style="margin-top:6px">
+                            <span class="badge" style="background:${job.service_type === 'Home Pickup' ? '#8b5cf622' : '#0ea5e922'};color:${job.service_type === 'Home Pickup' ? '#a78bfa' : '#38bdf8'}">
+                                ${job.service_type === 'Home Pickup' ? '🏠 Home Pickup / Visit' : '🏪 Store Drop-off'}
+                            </span>
+                        </div>
+                        ${job.pickup_address ? `
+                            <div style="font-size:0.82rem;margin-top:6px;color:var(--text-secondary)">
+                                📍 <b>Address:</b> ${job.pickup_address}
+                                <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.pickup_address)}" target="_blank" style="margin-left:6px;color:var(--primary);text-decoration:none;font-weight:600">🗺️ Maps</a>
+                            </div>
+                        ` : ''}
                     </div>
                     <div class="card">
                         <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;font-weight:700">ASSIGNED TECHNICIAN</div>

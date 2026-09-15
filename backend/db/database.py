@@ -94,6 +94,8 @@ def init_db():
             assigned_at DATETIME,
             assigned_by INTEGER,
             shop_id INTEGER DEFAULT 1,
+            service_type TEXT DEFAULT 'Store Drop-off',  -- Store Drop-off | Home Pickup
+            pickup_address TEXT,
             problem_description TEXT NOT NULL,
             image_path TEXT,
             status TEXT NOT NULL DEFAULT 'Requested',  -- Requested | Assigned | Diagnosing | Approved | Repairing | Ready | Delivered | Completed | Cancelled | On Hold | Rejected
@@ -370,6 +372,8 @@ def init_db():
         "ALTER TABLE bills ADD COLUMN shop_id INTEGER DEFAULT 1",
         "ALTER TABLE repair_jobs ADD COLUMN assigned_at DATETIME",
         "ALTER TABLE repair_jobs ADD COLUMN assigned_by INTEGER REFERENCES users(id)",
+        "ALTER TABLE repair_jobs ADD COLUMN service_type TEXT DEFAULT 'Store Drop-off'",
+        "ALTER TABLE repair_jobs ADD COLUMN pickup_address TEXT",
         "ALTER TABLE inventory ADD COLUMN reorder_quantity INTEGER DEFAULT 10",
         "ALTER TABLE feedback ADD COLUMN technician_id INTEGER REFERENCES users(id)",
         "ALTER TABLE feedback ADD COLUMN technician_rating INTEGER",

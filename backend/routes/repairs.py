@@ -62,6 +62,8 @@ async def submit_repair(
     model: str = Form(...),
     problem_description: str = Form(...),
     estimated_cost: float = Form(0),
+    service_type: str = Form("Store Drop-off"),
+    pickup_address: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     current_user: dict = Depends(get_current_user)
 ):
@@ -105,12 +107,17 @@ async def submit_repair(
 
     repair_id = generate_repair_id(conn)
 
+    # Normalize service_type
+    s_type = "Home Pickup" if "home" in service_type.lower() or "pickup" in service_type.lower() else "Store Drop-off"
+
     cursor = conn.execute("""
         INSERT INTO repair_jobs (repair_id, customer_id, device_id, problem_description,
-                                image_path, estimated_cost, status, priority, shop_id)
-        VALUES (?,?,?,?,?,?,?,?,?)
+                                image_path, estimated_cost, status, priority, shop_id,
+                                service_type, pickup_address)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
     """, (repair_id, current_user["id"], device_id, problem_description,
-          image_path, estimated_cost, "Requested", "Normal", current_user.get("shop_id", 1)))
+          image_path, estimated_cost, "Requested", "Normal", current_user.get("shop_id", 1),
+          s_type, pickup_address))
 
     job_db_id = cursor.lastrowid
 
@@ -312,7 +319,7 @@ def track_repair(repair_id: str):
     conn = get_db()
     job = conn.execute("""
         SELECT rj.id, rj.repair_id, rj.status, rj.problem_description, rj.created_at, rj.updated_at,
-               rj.estimated_cost, rj.actual_cost, rj.technician_notes,
+               rj.estimated_cost, rj.actual_cost, rj.technician_notes, rj.service_type, rj.pickup_address,
                d.device_type, d.brand, d.model,
                c.name as customer_name
         FROM repair_jobs rj

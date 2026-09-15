@@ -190,6 +190,20 @@ async function renderRepairDetail(jobId) {
                         <div class="text-muted" style="font-size:0.75rem;margin-bottom:4px">${t('technicianNotes')}</div>
                         <div style="font-size:0.9rem">${job.technician_notes}</div>
                     ` : ''}
+                    <hr class="divider">
+                    <div style="font-size:0.85rem">
+                        <div class="flex justify-between items-center">
+                            <span><b>Service Mode:</b> ${job.service_type === 'Home Pickup' ? '🏠 Doorstep Visit / Home Pickup' : '🏪 Store Drop-off (Walk-in)'}</span>
+                            <span class="badge" style="background:${job.service_type === 'Home Pickup' ? '#8b5cf622' : '#0ea5e922'};color:${job.service_type === 'Home Pickup' ? '#a78bfa' : '#38bdf8'}">
+                                ${job.service_type || 'Store Drop-off'}
+                            </span>
+                        </div>
+                        ${job.pickup_address ? `
+                            <div style="margin-top:6px;color:var(--text-secondary)">
+                                📍 <b>Pickup Address:</b> ${job.pickup_address}
+                            </div>
+                        ` : ''}
+                    </div>
                 </div>
 
                 <!-- Staged Repair Photos Evidence (Before / During / After) -->
@@ -388,6 +402,49 @@ async function renderSubmitRepair() {
                         <label class="form-label">${t('problemDesc')}</label>
                         <textarea class="form-control" id="problem-desc" rows="4" placeholder="${t('problemPlaceholder')}" required oninput="triggerAIEstimate()" style="min-height:100px"></textarea>
                     </div>
+
+                    <!-- Service Delivery Mode (Store vs Home Pickup) -->
+                    <div class="form-group" style="margin-bottom:16px">
+                        <label class="form-label" style="font-weight:600">Service Mode / Delivery Preference</label>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                            <label style="display:flex;align-items:center;gap:10px;padding:12px;border:2px solid var(--primary);border-radius:var(--radius-sm);cursor:pointer;background:var(--surface-2)" id="mode-store-label">
+                                <input type="radio" name="service_type" value="Store Drop-off" checked onchange="togglePickupFields(this.value)">
+                                <div>
+                                    <div style="font-weight:600;font-size:0.95rem">🏪 Store Drop-off</div>
+                                    <div style="font-size:0.75rem;color:var(--text-muted)">Dukan par lekar aayenge</div>
+                                </div>
+                            </label>
+                            <label style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;background:var(--surface-1)" id="mode-home-label">
+                                <input type="radio" name="service_type" value="Home Pickup" onchange="togglePickupFields(this.value)">
+                                <div>
+                                    <div style="font-weight:600;font-size:0.95rem">🏠 Home Visit / Pickup</div>
+                                    <div style="font-size:0.75rem;color:var(--text-muted)">Technician ghar aayega</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Doorstep Pickup Address (Shown when Home Pickup is selected) -->
+                    <div id="pickup-address-container" style="display:none;background:var(--surface-2);border:1px dashed var(--primary);border-radius:var(--radius-sm);padding:14px;margin-bottom:16px">
+                        <div style="font-weight:600;font-size:0.9rem;margin-bottom:10px;color:var(--primary);display:flex;align-items:center;gap:6px">
+                            📍 Doorstep Pickup / Visit Address
+                        </div>
+                        <div class="form-group" style="margin-bottom:10px">
+                            <label class="form-label">House / Flat No., Building & Street Address *</label>
+                            <input type="text" class="form-control" id="pickup-street" placeholder="e.g. H.No 104, Block B, Main Market Road">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Landmark *</label>
+                                <input type="text" class="form-control" id="pickup-landmark" placeholder="e.g. Near Shiv Mandir / SBI ATM">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Area / Pincode</label>
+                                <input type="text" class="form-control" id="pickup-pincode" placeholder="e.g. Sector 15, 122001">
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="form-group">
                         <label class="form-label">${t('uploadImage')}</label>
                         <input type="file" class="form-control" id="device-image" accept="image/*">
@@ -406,6 +463,26 @@ async function renderSubmitRepair() {
             </div>
         </div>
     `);
+}
+
+function togglePickupFields(mode) {
+    const container = document.getElementById('pickup-address-container');
+    const storeLabel = document.getElementById('mode-store-label');
+    const homeLabel = document.getElementById('mode-home-label');
+    if (!container) return;
+    if (mode === 'Home Pickup') {
+        container.style.display = 'block';
+        homeLabel.style.border = '2px solid var(--primary)';
+        homeLabel.style.background = 'var(--surface-2)';
+        storeLabel.style.border = '1px solid var(--border)';
+        storeLabel.style.background = 'var(--surface-1)';
+    } else {
+        container.style.display = 'none';
+        storeLabel.style.border = '2px solid var(--primary)';
+        storeLabel.style.background = 'var(--surface-2)';
+        homeLabel.style.border = '1px solid var(--border)';
+        homeLabel.style.background = 'var(--surface-1)';
+    }
 }
 
 let aiTimeout = null;
@@ -459,6 +536,25 @@ async function handleSubmitRepair(e) {
         form.append('model', document.getElementById('device-model').value);
         form.append('problem_description', document.getElementById('problem-desc').value);
         form.append('estimated_cost', window._aiEstimate || 0);
+
+        // Service Type & Address
+        const serviceType = document.querySelector('input[name="service_type"]:checked')?.value || 'Store Drop-off';
+        let pickupAddress = '';
+        if (serviceType === 'Home Pickup') {
+            const street = document.getElementById('pickup-street')?.value.trim();
+            const landmark = document.getElementById('pickup-landmark')?.value.trim();
+            const pincode = document.getElementById('pickup-pincode')?.value.trim();
+            if (!street) {
+                showToast('Please enter your house and street address for home visit', 'warning');
+                btn.innerHTML = t('submitBtn');
+                btn.disabled = false;
+                return;
+            }
+            pickupAddress = `${street}${landmark ? ', Landmark: ' + landmark : ''}${pincode ? ', ' + pincode : ''}`;
+        }
+        form.append('service_type', serviceType);
+        form.append('pickup_address', pickupAddress);
+
         const imageFile = document.getElementById('device-image').files[0];
         if (imageFile) form.append('image', imageFile);
 

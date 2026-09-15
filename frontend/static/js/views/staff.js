@@ -73,6 +73,9 @@ function renderStaffJobCard(job) {
             <div class="flex justify-between items-center mb-2">
                 <span class="repair-card-id">${job.repair_id}</span>
                 <div class="flex gap-2 items-center">
+                    <span class="badge" style="background:${job.service_type === 'Home Pickup' ? '#8b5cf622' : '#0ea5e922'};color:${job.service_type === 'Home Pickup' ? '#a78bfa' : '#38bdf8'}">
+                        ${job.service_type === 'Home Pickup' ? '🏠 Home Visit' : '🏪 Store'}
+                    </span>
                     ${job.priority && job.priority !== 'Normal' ? `<span class="badge" style="color:${pColor};background:${pColor}22">${job.priority}</span>` : ''}
                     ${statusBadge(job.status)}
                 </div>
@@ -102,10 +105,53 @@ async function renderStaffJobDetail(jobId) {
             <div class="page" style="max-width:800px;margin:0 auto">
                 <div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
                     <button class="btn btn-outline btn-sm" onclick="router.navigate('/staff')">← Back to Jobs</button>
-                    ${statusBadge(job.status)}
+                    <div class="flex gap-2 items-center">
+                        <span class="badge" style="background:${job.service_type === 'Home Pickup' ? '#8b5cf622' : '#0ea5e922'};color:${job.service_type === 'Home Pickup' ? '#a78bfa' : '#38bdf8'}">
+                            ${job.service_type === 'Home Pickup' ? '🏠 Home Visit' : '🏪 Store Drop-off'}
+                        </span>
+                        ${statusBadge(job.status)}
+                    </div>
                 </div>
 
-                <!-- Device Card & Customer Call -->
+                <!-- Customer Location & Dispatch Info -->
+                <div class="card" style="margin-bottom:16px;border-left:4px solid ${job.service_type === 'Home Pickup' ? '#8b5cf6' : '#0ea5e9'}">
+                    <div class="flex justify-between items-start flex-wrap gap-2">
+                        <div>
+                            <div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px">
+                                Service Mode: <span style="color:${job.service_type === 'Home Pickup' ? '#a78bfa' : '#38bdf8'}">${job.service_type === 'Home Pickup' ? '🏠 Doorstep Visit / Home Pickup' : '🏪 Store Workshop Drop-off'}</span>
+                            </div>
+                            ${job.service_type === 'Home Pickup' ? `
+                                <div style="font-size:1.05rem;font-weight:600;margin:6px 0;color:var(--text-primary)">
+                                    📍 ${job.pickup_address || 'Address not specified'}
+                                </div>
+                                <div class="text-muted" style="font-size:0.8rem">
+                                    Customer: <b>${job.customer_name}</b> | Phone: <b>${job.customer_phone || 'N/A'}</b>
+                                </div>
+                            ` : `
+                                <div style="font-size:0.95rem;margin:6px 0;color:var(--text-secondary)">
+                                    🏪 Customer will drop-off device at shop workshop.
+                                </div>
+                                <div class="text-muted" style="font-size:0.8rem">
+                                    Customer: <b>${job.customer_name}</b> | Phone: <b>${job.customer_phone || 'N/A'}</b>
+                                </div>
+                            `}
+                        </div>
+                        <div class="flex gap-2 flex-wrap">
+                            ${job.service_type === 'Home Pickup' && job.pickup_address ? `
+                                <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.pickup_address)}" target="_blank" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;text-decoration:none">
+                                    🗺️ Open Google Maps
+                                </a>
+                            ` : ''}
+                            ${job.customer_phone ? `
+                                <a href="tel:${job.customer_phone}" class="btn btn-outline btn-sm" style="display:flex;align-items:center;gap:6px;text-decoration:none">
+                                    📞 Call Customer
+                                </a>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Device Card -->
                 <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
                     <div class="flex justify-between items-start flex-wrap gap-2">
                         <div>
@@ -113,11 +159,6 @@ async function renderStaffJobDetail(jobId) {
                             <h2 style="font-size:1.3rem;margin:4px 0">${job.brand} ${job.model}</h2>
                             <div class="text-muted" style="font-size:0.85rem">${job.device_type} · Priority: <b>${job.priority || 'Normal'}</b></div>
                         </div>
-                        ${job.customer_phone ? `
-                            <a href="tel:${job.customer_phone}" class="btn btn-outline btn-sm" style="display:flex;align-items:center;gap:6px;text-decoration:none">
-                                📞 Call Customer (${job.customer_name})
-                            </a>
-                        ` : ''}
                     </div>
                     <div style="margin-top:12px;padding:8px 12px;background:var(--bg-input);border-radius:var(--radius-sm);font-size:0.85rem">
                         <b>Reported Problem:</b> ${job.problem_description}
