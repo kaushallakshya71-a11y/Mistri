@@ -296,12 +296,6 @@ async function uploadStaffPhoto(jobId) {
         btn.disabled = false;
     }
 }
-        showToast('Part added!', 'success');
-        renderStaffJobDetail(jobId);
-    } catch (e) {
-        showToast(e.message, 'error');
-    }
-}
 
 /** Staff Inventory View (read-only) */
 async function renderStaffInventory() {

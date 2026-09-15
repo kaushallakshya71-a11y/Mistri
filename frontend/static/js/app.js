@@ -63,12 +63,31 @@ function hideLoading() {
     if (loader) {
         loader.style.opacity = '0';
         loader.style.transition = 'opacity 0.3s ease';
-        setTimeout(() => loader.remove(), 300);
+        setTimeout(() => {
+            if (loader && loader.parentNode) loader.remove();
+        }, 300);
     }
 }
 
-// Start the app
+// Start the app with error resilience
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        try {
+            hideLoading();
+            router.start();
+        } catch (e) {
+            console.error('Router start error:', e);
+            hideLoading();
+        }
+    }, 600);
+});
+
+// Failsafe: if DOMContentLoaded already fired or delayed
 setTimeout(() => {
-    hideLoading();
-    router.start();
-}, 1500);
+    try {
+        hideLoading();
+        if (!router.currentRoute) router.start();
+    } catch (e) {
+        hideLoading();
+    }
+}, 2000);
