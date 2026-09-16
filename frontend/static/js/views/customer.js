@@ -361,7 +361,7 @@ async function submitFeedback(jobId) {
     }
 }
 
-/**/** Submit Repair with AI Estimator - v7: Improved with Hinglish AI, video upload, pincode validation */
+/** Submit Repair with AI Estimator - v7: Improved with Hinglish AI, video upload, pincode validation */
 async function renderSubmitRepair() {
     setContent(`
         <div class="page" style="max-width:740px;margin:0 auto">
