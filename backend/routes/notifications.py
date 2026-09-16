@@ -14,7 +14,13 @@ def get_notifications(current_user: dict = Depends(get_current_user)):
         SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 20
     """, (current_user["id"],)).fetchall()
     conn.close()
-    return [dict(n) for n in notifs]
+    result = []
+    for n in notifs:
+        item = dict(n)
+        if item.get("created_at") and isinstance(item["created_at"], str) and not item["created_at"].endswith("Z"):
+            item["created_at"] = item["created_at"].replace(" ", "T") + "Z"
+        result.append(item)
+    return result
 
 @router.patch("/{notif_id}/read")
 def mark_read(notif_id: int, current_user: dict = Depends(get_current_user)):

@@ -180,7 +180,7 @@ async function loadNotifications() {
             <div class="notif-item ${n.is_read ? '' : 'unread'}">
                 <div class="notif-title">${n.title}</div>
                 <div class="notif-msg">${n.message}</div>
-                <div class="notif-time">${formatDate(n.created_at)}</div>
+                <div class="notif-time">🕒 ${formatNotificationTime(n.created_at)}</div>
             </div>
         `).join('');
     } catch (e) { }
@@ -208,11 +208,62 @@ function showToast(message, type = 'info', duration = 4000) {
     }, duration);
 }
 
-/** Helpers */
+/** Helpers: Indian Standard Time (IST - Asia/Kolkata, UTC+5:30) */
+function parseDateIST(dateStr) {
+    if (!dateStr) return null;
+    let dStr = dateStr;
+    if (typeof dateStr === 'string' && !dateStr.includes('Z') && !dateStr.includes('+')) {
+        dStr = dateStr.replace(' ', 'T') + 'Z';
+    }
+    const d = new Date(dStr);
+    return isNaN(d.getTime()) ? new Date(dateStr) : d;
+}
+
 function formatDate(dateStr) {
-    if (!dateStr) return '—';
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const d = parseDateIST(dateStr);
+    if (!d) return '—';
+    return d.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+    });
+}
+
+function formatNotificationTime(dateStr) {
+    const d = parseDateIST(dateStr);
+    if (!d) return '—';
+    const now = new Date();
+    const diffSec = Math.floor((now.getTime() - d.getTime()) / 1000);
+
+    const timeStr = d.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+    });
+
+    if (diffSec >= 0 && diffSec < 60) return `Just now (${timeStr} IST)`;
+    if (diffSec >= 60 && diffSec < 3600) {
+        const mins = Math.floor(diffSec / 60);
+        return `${mins} min${mins > 1 ? 's' : ''} ago (${timeStr} IST)`;
+    }
+    if (diffSec >= 3600 && diffSec < 86400) {
+        const hrs = Math.floor(diffSec / 3600);
+        return `${hrs} hr${hrs > 1 ? 's' : ''} ago (${timeStr} IST)`;
+    }
+    return d.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+    }) + ' IST';
 }
 
 function formatCurrency(amount) {
