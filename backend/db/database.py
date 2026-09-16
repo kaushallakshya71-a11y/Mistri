@@ -399,6 +399,16 @@ def init_db():
     except Exception:
         pass
 
+    # Ensure demo customer arun@gmail.com is available alongside arun@example.com
+    try:
+        cursor.execute("""
+            INSERT OR IGNORE INTO users (name, email, phone, password_hash, role, auth_provider)
+            SELECT name, 'arun@gmail.com', phone, password_hash, role, auth_provider
+            FROM users WHERE email = 'arun@example.com'
+        """)
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
     print("✅ Database initialized successfully with comprehensive enterprise schema")
