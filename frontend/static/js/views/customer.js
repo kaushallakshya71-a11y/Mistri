@@ -361,10 +361,10 @@ async function submitFeedback(jobId) {
     }
 }
 
-/** Submit Repair with AI Estimator */
+/**/** Submit Repair with AI Estimator - v7: Improved with Hinglish AI, video upload, pincode validation */
 async function renderSubmitRepair() {
     setContent(`
-        <div class="page" style="max-width:700px;margin:0 auto">
+        <div class="page" style="max-width:740px;margin:0 auto">
             <div style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
                 <button class="btn btn-outline btn-sm" onclick="router.navigate('/customer')">${t('back')}</button>
                 ${langToggleBtn()}
@@ -373,96 +373,211 @@ async function renderSubmitRepair() {
                 <div class="page-title">${t('submitRepairTitle')}</div>
                 <div class="page-subtitle">${t('submitRepairSub')}</div>
             </div>
-            <div class="card">
-                <form id="repair-form" onsubmit="handleSubmitRepair(event)">
+
+            <!-- Device Cards Container -->
+            <div id="devices-container"></div>
+
+            <!-- Add Another Device Button -->
+            <button type="button" class="btn btn-outline w-full" id="add-device-btn" onclick="addDeviceCard()"
+                style="margin-bottom:20px;border-style:dashed;display:flex;align-items:center;justify-content:center;gap:8px">
+                ➕ Add Another Device / Appliance
+            </button>
+
+            <!-- Service Mode Selection -->
+            <div class="card" style="margin-bottom:20px">
+                <div class="form-group" style="margin-bottom:16px">
+                    <label class="form-label" style="font-weight:600">Service Mode / Delivery Preference</label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                        <label style="display:flex;align-items:center;gap:10px;padding:12px;border:2px solid var(--primary);border-radius:var(--radius-sm);cursor:pointer;background:var(--surface-2)" id="mode-store-label">
+                            <input type="radio" name="service_type" value="Store Drop-off" checked onchange="togglePickupFields(this.value)">
+                            <div>
+                                <div style="font-weight:600;font-size:0.95rem">🏪 Store Drop-off</div>
+                                <div style="font-size:0.75rem;color:var(--text-muted)">Dukan par lekar aayenge</div>
+                            </div>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;background:var(--surface-1)" id="mode-home-label">
+                            <input type="radio" name="service_type" value="Home Pickup" onchange="togglePickupFields(this.value)">
+                            <div>
+                                <div style="font-weight:600;font-size:0.95rem">🏠 Home Visit / Pickup</div>
+                                <div style="font-size:0.75rem;color:var(--text-muted)">Technician ghar aayega</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Address Fields (visible when Home Pickup selected) -->
+                <div id="pickup-address-container" style="display:none;background:var(--surface-2);border:1px dashed var(--primary);border-radius:var(--radius-sm);padding:14px">
+                    <div style="font-weight:600;font-size:0.9rem;margin-bottom:10px;color:var(--primary)">📍 Ghar ka Pata (Home Address)</div>
+                    <div class="form-group" style="margin-bottom:10px">
+                        <label class="form-label">House / Flat No., Building & Street *</label>
+                        <input type="text" class="form-control" id="pickup-street" placeholder="e.g. H.No 104, Block B, Main Market Road">
+                        <div id="pickup-street-err" style="display:none;color:var(--danger);font-size:0.78rem;margin-top:4px"></div>
+                    </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">${t('applianceType')}</label>
-                            <select class="form-control" id="device-type" onchange="triggerAIEstimate()" required>
-                                <option value="">${t('selectAppliance')}</option>
-                                <option value="Fan">🌀 Fan</option>
-                                <option value="Cooler">❄️ Cooler</option>
-                                <option value="Mixer/Grinder">🥤 Mixer / Grinder</option>
-                                <option value="Motor">⚙️ Motor</option>
-                                <option value="Geyser">🔥 Geyser / Water Heater</option>
-                                <option value="Pump">💧 Water Pump</option>
-                                <option value="Other">🔌 Other</option>
-                            </select>
+                            <label class="form-label">Landmark * (koi pehchaan ki jagah)</label>
+                            <input type="text" class="form-control" id="pickup-landmark" placeholder="e.g. Near Shiv Mandir / SBI ATM">
+                            <div id="pickup-landmark-err" style="display:none;color:var(--danger);font-size:0.78rem;margin-top:4px"></div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">${t('brand')}</label>
-                            <input type="text" class="form-control" id="device-brand" placeholder="${t('brandPlaceholder')}" required>
+                            <label class="form-label">Pincode * (exactly 6 digits)</label>
+                            <input type="text" class="form-control" id="pickup-pincode" placeholder="e.g. 208001" maxlength="6"
+                                oninput="validatePincodeField(this.value)" inputmode="numeric">
+                            <div id="pickup-pincode-err" style="display:none;font-size:0.78rem;margin-top:4px"></div>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">${t('modelSize')}</label>
-                        <input type="text" class="form-control" id="device-model" placeholder="${t('modelPlaceholder')}" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">${t('problemDesc')}</label>
-                        <textarea class="form-control" id="problem-desc" rows="4" placeholder="${t('problemPlaceholder')}" required oninput="triggerAIEstimate()" style="min-height:100px"></textarea>
-                    </div>
-
-                    <!-- Service Delivery Mode (Store vs Home Pickup) -->
-                    <div class="form-group" style="margin-bottom:16px">
-                        <label class="form-label" style="font-weight:600">Service Mode / Delivery Preference</label>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                            <label style="display:flex;align-items:center;gap:10px;padding:12px;border:2px solid var(--primary);border-radius:var(--radius-sm);cursor:pointer;background:var(--surface-2)" id="mode-store-label">
-                                <input type="radio" name="service_type" value="Store Drop-off" checked onchange="togglePickupFields(this.value)">
-                                <div>
-                                    <div style="font-weight:600;font-size:0.95rem">🏪 Store Drop-off</div>
-                                    <div style="font-size:0.75rem;color:var(--text-muted)">Dukan par lekar aayenge</div>
-                                </div>
-                            </label>
-                            <label style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;background:var(--surface-1)" id="mode-home-label">
-                                <input type="radio" name="service_type" value="Home Pickup" onchange="togglePickupFields(this.value)">
-                                <div>
-                                    <div style="font-weight:600;font-size:0.95rem">🏠 Home Visit / Pickup</div>
-                                    <div style="font-size:0.75rem;color:var(--text-muted)">Technician ghar aayega</div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Doorstep Pickup Address (Shown when Home Pickup is selected) -->
-                    <div id="pickup-address-container" style="display:none;background:var(--surface-2);border:1px dashed var(--primary);border-radius:var(--radius-sm);padding:14px;margin-bottom:16px">
-                        <div style="font-weight:600;font-size:0.9rem;margin-bottom:10px;color:var(--primary);display:flex;align-items:center;gap:6px">
-                            📍 Doorstep Pickup / Visit Address
-                        </div>
-                        <div class="form-group" style="margin-bottom:10px">
-                            <label class="form-label">House / Flat No., Building & Street Address *</label>
-                            <input type="text" class="form-control" id="pickup-street" placeholder="e.g. H.No 104, Block B, Main Market Road">
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">Landmark *</label>
-                                <input type="text" class="form-control" id="pickup-landmark" placeholder="e.g. Near Shiv Mandir / SBI ATM">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Area / Pincode</label>
-                                <input type="text" class="form-control" id="pickup-pincode" placeholder="e.g. Sector 15, 122001">
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">${t('uploadImage')}</label>
-                        <input type="file" class="form-control" id="device-image" accept="image/*">
-                    </div>
-
-                    <!-- AI Estimator Widget -->
-                    <div class="ai-estimator" id="ai-estimator">
-                        <div class="ai-label">${t('aiEstimator')} <span class="ai-badge">AI</span></div>
-                        <div id="ai-result" style="color:var(--text-muted);font-size:0.875rem">${t('fillToEstimate')}</div>
-                    </div>
-
-                    <button type="submit" class="btn btn-primary w-full" id="submit-btn" style="margin-top:20px">
-                        ${t('submitBtn')}
-                    </button>
-                </form>
+                </div>
             </div>
+
+            <!-- Total Estimated Cost Bar (visible when 2+ devices) -->
+            <div id="total-cost-bar" style="display:none;background:linear-gradient(135deg,var(--surface-2),var(--surface-1));border:1px solid var(--primary);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                    <div>
+                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:2px">AI Estimated Total (all devices)</div>
+                        <div id="total-cost-value" style="font-size:1.4rem;font-weight:800;color:var(--primary)">₹0</div>
+                    </div>
+                    <div id="total-devices-count" style="font-size:0.85rem;color:var(--text-muted)"></div>
+                </div>
+            </div>
+
+            <!-- Submit Button -->
+            <button type="button" class="btn btn-primary w-full" id="submit-all-btn" onclick="handleSubmitAllRepairs()" style="margin-bottom:32px">
+                ${t('submitBtn')}
+            </button>
         </div>
     `);
+
+    // Initialize device counter
+    window._deviceCards = [];
+    window._deviceCounter = 0;
+    addDeviceCard();
+}
+
+// Track device card state
+window._deviceCards = [];
+window._deviceCounter = 0;
+
+function addDeviceCard() {
+    const idx = window._deviceCounter++;
+    window._deviceCards.push({ idx, aiEstimate: 0 });
+
+    const container = document.getElementById('devices-container');
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.id = `device-card-${idx}`;
+    card.style.cssText = 'margin-bottom:16px;border:1px solid var(--border)';
+    const cardNum = window._deviceCards.length;
+    card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <div style="font-weight:700;font-size:0.95rem;color:var(--primary)" id="device-title-${idx}">🔧 Device ${cardNum}</div>
+            ${cardNum > 1 ? `<button type="button" class="btn btn-outline btn-sm" style="border-color:var(--danger);color:var(--danger);padding:4px 10px" onclick="removeDeviceCard(${idx})">✕ Remove</button>` : ''}
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">${t('applianceType')}</label>
+                <select class="form-control" id="dtype-${idx}" onchange="triggerDeviceAI(${idx})" required>
+                    <option value="">— ${t('selectAppliance')} —</option>
+                    <option value="Fan">🌀 Fan</option>
+                    <option value="Cooler">❄️ Cooler</option>
+                    <option value="Mixer/Grinder">🥤 Mixer / Grinder</option>
+                    <option value="Motor">⚙️ Motor</option>
+                    <option value="Geyser">🔥 Geyser / Water Heater</option>
+                    <option value="Pump">💧 Water Pump</option>
+                    <option value="Mobile">📱 Mobile</option>
+                    <option value="Laptop">💻 Laptop</option>
+                    <option value="Other">🔌 Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">${t('brand')}</label>
+                <input type="text" class="form-control" id="dbrand-${idx}" placeholder="${t('brandPlaceholder')}" required>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">${t('modelSize')}</label>
+            <input type="text" class="form-control" id="dmodel-${idx}" placeholder="${t('modelPlaceholder')}" required>
+        </div>
+        <div class="form-group">
+            <label class="form-label">${t('problemDesc')}</label>
+            <textarea class="form-control" id="dproblem-${idx}" rows="3" placeholder="${t('problemPlaceholder')}"
+                required oninput="triggerDeviceAI(${idx})" style="min-height:85px"></textarea>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">📷 Photo (Optional, max 5MB)</label>
+                <input type="file" class="form-control" id="dimage-${idx}" accept="image/jpeg,image/png,image/webp"
+                    onchange="validateMediaFile(this,'image','dimage-err-${idx}',5)">
+                <div id="dimage-err-${idx}" style="display:none;font-size:0.78rem;margin-top:4px"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">🎥 Video (Optional, max 50MB)</label>
+                <input type="file" class="form-control" id="dvideo-${idx}" accept="video/mp4,video/quicktime,video/avi,video/webm"
+                    onchange="validateMediaFile(this,'video','dvideo-err-${idx}',50)">
+                <div id="dvideo-err-${idx}" style="display:none;font-size:0.78rem;margin-top:4px"></div>
+            </div>
+        </div>
+        <!-- AI Estimator per device -->
+        <div class="ai-estimator" id="ai-estimator-${idx}" style="margin-top:4px">
+            <div class="ai-label">${t('aiEstimator')} <span class="ai-badge">AI</span></div>
+            <div id="ai-result-${idx}" style="color:var(--text-muted);font-size:0.875rem">${t('fillToEstimate')}</div>
+        </div>
+    `;
+    container.appendChild(card);
+    updateDeviceNumbers();
+}
+
+function removeDeviceCard(idx) {
+    document.getElementById(`device-card-${idx}`)?.remove();
+    window._deviceCards = window._deviceCards.filter(d => d.idx !== idx);
+    updateDeviceNumbers();
+    updateTotalCost();
+}
+
+function updateDeviceNumbers() {
+    window._deviceCards.forEach((d, i) => {
+        const title = document.getElementById(`device-title-${d.idx}`);
+        if (title) title.textContent = `🔧 Device ${i + 1}`;
+    });
+    const addBtn = document.getElementById('add-device-btn');
+    if (addBtn) addBtn.style.display = window._deviceCards.length >= 10 ? 'none' : 'flex';
+}
+
+function updateTotalCost() {
+    const total = window._deviceCards.reduce((s, d) => s + (d.aiEstimate || 0), 0);
+    const bar = document.getElementById('total-cost-bar');
+    const valEl = document.getElementById('total-cost-value');
+    const countEl = document.getElementById('total-devices-count');
+    if (bar) bar.style.display = window._deviceCards.length > 1 && total > 0 ? 'block' : 'none';
+    if (valEl) valEl.textContent = `₹${total.toLocaleString('en-IN')}`;
+    if (countEl) countEl.textContent = `${window._deviceCards.length} device(s) total`;
+}
+
+function validateMediaFile(input, type, errId, maxMB) {
+    const errEl = document.getElementById(errId);
+    if (!errEl || !input.files[0]) { if (errEl) errEl.style.display = 'none'; return true; }
+    const file = input.files[0];
+    const maxBytes = maxMB * 1024 * 1024;
+    if (file.size > maxBytes) {
+        errEl.textContent = `❌ File too large. Max: ${maxMB}MB`;
+        errEl.style.color = 'var(--danger)'; errEl.style.display = 'block';
+        input.value = ''; return false;
+    }
+    errEl.textContent = `✓ ${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
+    errEl.style.color = 'var(--success)'; errEl.style.display = 'block';
+    return true;
+}
+
+function validatePincodeField(value) {
+    const errEl = document.getElementById('pickup-pincode-err');
+    if (!errEl) return;
+    if (!value) { errEl.style.display = 'none'; return; }
+    if (/^[1-9][0-9]{5}$/.test(value)) {
+        errEl.textContent = '✓ Valid Indian pincode';
+        errEl.style.color = 'var(--success)'; errEl.style.display = 'block';
+    } else {
+        errEl.textContent = '❌ Pincode must be exactly 6 digits and cannot start with 0 (e.g. 208001)';
+        errEl.style.color = 'var(--danger)'; errEl.style.display = 'block';
+    }
 }
 
 function togglePickupFields(mode) {
@@ -485,87 +600,174 @@ function togglePickupFields(mode) {
     }
 }
 
+// Legacy single-device AI trigger (still used)
 let aiTimeout = null;
-async function triggerAIEstimate() {
-    clearTimeout(aiTimeout);
-    aiTimeout = setTimeout(async () => {
-        const deviceType = document.getElementById('device-type')?.value;
-        const problem = document.getElementById('problem-desc')?.value;
-        if (!deviceType || problem.length < 8) return;
+async function triggerAIEstimate() { triggerDeviceAI(0); }
 
-        const resultEl = document.getElementById('ai-result');
-        resultEl.innerHTML = `<div class="spinner"></div> ${t('estimating')}`;
+const _aiTimeouts = {};
+async function triggerDeviceAI(idx) {
+    clearTimeout(_aiTimeouts[idx]);
+    _aiTimeouts[idx] = setTimeout(async () => {
+        const deviceType = document.getElementById(`dtype-${idx}`)?.value;
+        const problem = document.getElementById(`dproblem-${idx}`)?.value;
+        if (!deviceType || !problem || problem.length < 8) return;
+
+        const resultEl = document.getElementById(`ai-result-${idx}`);
+        if (!resultEl) return;
+        resultEl.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;display:inline-block;margin-right:8px"></div> ${t('estimating')}`;
         try {
             const est = await api.post('/ai/estimate', { device_type: deviceType, problem_description: problem });
+            const confColors = { High: '#22c55e', Medium: '#f59e0b', Low: '#ef4444' };
+            const confColor = confColors[est.confidence_level] || '#6b7280';
+
             resultEl.innerHTML = `
                 <div class="ai-result">
-                    <div class="ai-cost-range">₹${est.estimated_cost_min.toLocaleString()} – ₹${est.estimated_cost_max.toLocaleString()}</div>
-                    <div class="ai-confidence">${t('confidence')}: ${est.confidence}% | Suspected: <b>${est.symptom_detected || est.primary_part}</b></div>
-                    ${est.explanation ? `
-                        <div style="background:var(--surface-2);border-left:3px solid var(--primary);padding:8px 12px;border-radius:4px;margin:10px 0;font-size:0.8rem;line-height:1.4;color:var(--text-secondary)">
-                            💡 <b>AI Diagnostic Note:</b> ${est.explanation}
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+                        <div>
+                            <div class="ai-cost-range">₹${est.estimated_cost_min.toLocaleString()} – ₹${est.estimated_cost_max.toLocaleString()}</div>
+                            <div style="font-size:0.72rem;color:var(--text-muted)">Total Estimate</div>
                         </div>
-                    ` : ''}
-                    <div class="ai-breakdown">
+                        <div style="background:${confColor}22;color:${confColor};border:1px solid ${confColor}55;padding:4px 10px;border-radius:20px;font-size:0.75rem;font-weight:700">
+                            ${est.confidence_level==='High'?'🟢':est.confidence_level==='Medium'?'🟡':'🔴'} ${est.confidence_level||'Medium'} (${est.confidence}%)
+                        </div>
+                    </div>
+                    <div class="ai-breakdown" style="margin-bottom:10px">
+                        <div class="ai-breakdown-item">
+                            <div class="ai-breakdown-key">Parts</div>
+                            <div>₹${(est.parts_cost_min||0).toLocaleString()} – ₹${(est.parts_cost_max||0).toLocaleString()}</div>
+                        </div>
+                        <div class="ai-breakdown-item">
+                            <div class="ai-breakdown-key">Labour</div>
+                            <div>₹${(est.labor_cost_min||0).toLocaleString()} – ₹${(est.labor_cost_max||0).toLocaleString()}</div>
+                        </div>
                         <div class="ai-breakdown-item">
                             <div class="ai-breakdown-key">${t('estTime')}</div>
-                            <div>${est.estimated_time_min_hours}–${est.estimated_time_max_hours} ${t('hours')}</div>
+                            <div>${est.estimated_time_min_hours}–${est.estimated_time_max_hours}h</div>
                         </div>
                         <div class="ai-breakdown-item">
                             <div class="ai-breakdown-key">${t('mainPart')}</div>
-                            <div>${est.primary_part}</div>
+                            <div style="font-size:0.78rem">${est.primary_part}</div>
                         </div>
                     </div>
-                    <div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px">${est.disclaimer || est.note}</div>
+                    ${est.hinglish_explanation ? `
+                        <div style="background:var(--surface-2);border-left:3px solid var(--primary);padding:10px 12px;border-radius:4px;margin-bottom:8px;font-size:0.82rem;line-height:1.5;color:var(--text-secondary)">
+                            🤖 <b>AI:</b> ${est.hinglish_explanation}
+                        </div>
+                    ` : ''}
+                    ${est.follow_up_questions && est.follow_up_questions.length > 0 ? `
+                        <div style="background:#ef444411;border:1px solid #ef444433;padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:8px">
+                            <div style="font-size:0.78rem;font-weight:700;color:#ef4444;margin-bottom:4px">❓ Better estimate ke liye:</div>
+                            <ul style="font-size:0.78rem;color:var(--text-secondary);padding-left:16px;margin:0">
+                                ${est.follow_up_questions.slice(0,3).map(q=>`<li style="margin-bottom:2px">${q}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    <div style="font-size:0.7rem;color:var(--text-muted);font-style:italic">${est.disclaimer}</div>
                 </div>
             `;
-            window._aiEstimate = est.estimated_cost_min;
-        } catch (e) { }
-    }, 600);
+            const cardData = window._deviceCards.find(d => d.idx === idx);
+            if (cardData) { cardData.aiEstimate = est.estimated_cost_min || 0; updateTotalCost(); }
+            window._aiEstimate = est.estimated_cost_min; // legacy compat
+        } catch (e) {
+            resultEl.innerHTML = `<div style="color:var(--text-muted);font-size:0.8rem">⚠️ Problem thodi zyada detail mein describe karein.</div>`;
+        }
+    }, 700);
 }
 
-async function handleSubmitRepair(e) {
-    e.preventDefault();
-    const btn = document.getElementById('submit-btn');
-    btn.innerHTML = `<div class="spinner"></div> ${t('submitting')}`;
-    btn.disabled = true;
-    try {
-        const form = new FormData();
-        form.append('device_type', document.getElementById('device-type').value);
-        form.append('brand', document.getElementById('device-brand').value);
-        form.append('model', document.getElementById('device-model').value);
-        form.append('problem_description', document.getElementById('problem-desc').value);
-        form.append('estimated_cost', window._aiEstimate || 0);
+async function handleSubmitAllRepairs() {
+    const btn = document.getElementById('submit-all-btn');
+    if (!btn) return;
 
-        // Service Type & Address
-        const serviceType = document.querySelector('input[name="service_type"]:checked')?.value || 'Store Drop-off';
-        let pickupAddress = '';
-        if (serviceType === 'Home Pickup') {
-            const street = document.getElementById('pickup-street')?.value.trim();
-            const landmark = document.getElementById('pickup-landmark')?.value.trim();
-            const pincode = document.getElementById('pickup-pincode')?.value.trim();
-            if (!street) {
-                showToast('Please enter your house and street address for home visit', 'warning');
-                btn.innerHTML = t('submitBtn');
-                btn.disabled = false;
-                return;
-            }
-            pickupAddress = `${street}${landmark ? ', Landmark: ' + landmark : ''}${pincode ? ', ' + pincode : ''}`;
+    // Validate all device cards
+    const devices = [];
+    for (const d of window._deviceCards) {
+        const deviceType = document.getElementById(`dtype-${d.idx}`)?.value;
+        const brand = document.getElementById(`dbrand-${d.idx}`)?.value?.trim();
+        const model = document.getElementById(`dmodel-${d.idx}`)?.value?.trim();
+        const problem = document.getElementById(`dproblem-${d.idx}`)?.value?.trim();
+        const imageFile = document.getElementById(`dimage-${d.idx}`)?.files?.[0];
+        const videoFile = document.getElementById(`dvideo-${d.idx}`)?.files?.[0];
+        const num = window._deviceCards.indexOf(d) + 1;
+
+        if (!deviceType) { showToast(`Device ${num}: Please select appliance type.`, 'error'); return; }
+        if (!brand) { showToast(`Device ${num}: Please enter the brand name.`, 'error'); return; }
+        if (!model) { showToast(`Device ${num}: Please enter the model/size.`, 'error'); return; }
+        if (!problem || problem.length < 5) { showToast(`Device ${num}: Please describe the problem (min 5 chars).`, 'error'); return; }
+
+        devices.push({ idx: d.idx, deviceType, brand, model, problem, imageFile, videoFile, aiEstimate: d.aiEstimate || 0 });
+    }
+
+    // Validate service type + address
+    const serviceType = document.querySelector('input[name="service_type"]:checked')?.value || 'Store Drop-off';
+    let pickupAddress = '';
+    let landmark = '';
+    let pincode = '';
+
+    if (serviceType === 'Home Pickup') {
+        const street = document.getElementById('pickup-street')?.value?.trim();
+        landmark = document.getElementById('pickup-landmark')?.value?.trim() || '';
+        pincode = document.getElementById('pickup-pincode')?.value?.trim() || '';
+
+        if (!street || street.length < 10) {
+            showToast('Please enter a complete street address (minimum 10 characters).', 'error'); return;
         }
-        form.append('service_type', serviceType);
-        form.append('pickup_address', pickupAddress);
+        if (!landmark || landmark.length < 3) {
+            showToast('Please enter a landmark (e.g. Near SBI ATM, Near Shiv Mandir).', 'error'); return;
+        }
+        if (!pincode || !/^[1-9][0-9]{5}$/.test(pincode)) {
+            showToast('Please enter a valid 6-digit Indian pincode (e.g. 208001). It cannot start with 0.', 'error'); return;
+        }
+        pickupAddress = `${street}, Landmark: ${landmark}, ${pincode}`;
+    }
 
-        const imageFile = document.getElementById('device-image').files[0];
-        if (imageFile) form.append('image', imageFile);
+    btn.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;display:inline-block;margin-right:8px"></div> Submitting...`;
+    btn.disabled = true;
 
-        const res = await api.post('/repairs/submit', form);
-        showToast(`Repair ${res.repair_id} submitted! 🎉`, 'success');
+    try {
+        const batchId = devices.length > 1 ? `BATCH-${Date.now().toString(36).toUpperCase().slice(-8)}` : null;
+        let firstRepairId = null;
+
+        for (let i = 0; i < devices.length; i++) {
+            const d = devices[i];
+            const form = new FormData();
+            form.append('device_type', d.deviceType);
+            form.append('brand', d.brand);
+            form.append('model', d.model);
+            form.append('problem_description', d.problem);
+            form.append('estimated_cost', d.aiEstimate || 0);
+            form.append('service_type', serviceType);
+            form.append('pickup_address', pickupAddress);
+            if (landmark) form.append('landmark', landmark);
+            if (pincode) form.append('pincode', pincode);
+            if (batchId) form.append('repair_batch_id', batchId);
+            if (d.imageFile) form.append('image', d.imageFile);
+            if (d.videoFile) form.append('video', d.videoFile);
+
+            if (devices.length > 1) {
+                btn.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;display:inline-block;margin-right:8px"></div> Submitting ${i+1}/${devices.length}...`;
+            }
+            const res = await api.post('/repairs/submit', form);
+            if (i === 0) firstRepairId = res.repair_id;
+        }
+
+        if (devices.length === 1) {
+            showToast(`Repair ${firstRepairId} submitted successfully! 🎉`, 'success');
+        } else {
+            const total = devices.reduce((s,d)=>s+d.aiEstimate,0);
+            showToast(`${devices.length} repair requests submitted! Total Estimate: ₹${total.toLocaleString('en-IN')} 🎉`, 'success');
+        }
         router.navigate('/customer');
     } catch (err) {
-        showToast(err.message, 'error');
+        showToast(err.message || 'Kuch galat ho gaya. Please dobara try karein.', 'error');
         btn.innerHTML = t('submitBtn');
         btn.disabled = false;
     }
+}
+
+// Legacy function alias for backward compatibility
+async function handleSubmitRepair(e) {
+    if (e) e.preventDefault();
+    await handleSubmitAllRepairs();
 }
 
 /** Customer Invoices */

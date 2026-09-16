@@ -1,6 +1,6 @@
 /**
  * Mistri Auth Views - Landing, Login, Register
- * New Design: Split panel login with Google button + appliance images
+ * v7: Real Gmail/phone/password validation + real Google OAuth support
  */
 
 /** Landing Page */
@@ -20,13 +20,10 @@ function renderLandingPage() {
                 <button class="btn btn-primary" onclick="router.navigate('/register')" style="font-size:1rem;padding:14px 32px">🚀 Get Started Free</button>
                 <button class="btn btn-outline" onclick="router.navigate('/login')" style="font-size:1rem;padding:14px 32px">🔑 Login</button>
             </div>
-
-            <!-- Appliance + Technician Images -->
             <div class="hero-img-row">
                 <img src="/static/img/appliances_hero.png" alt="Electrical Appliances" class="hero-img-appliances">
                 <img src="/static/img/technician.png" alt="Expert Technician" class="hero-img-technician">
             </div>
-
             <div class="hero-features">
                 <div class="feature-card">
                     <div class="feature-icon">🤖</div>
@@ -64,14 +61,14 @@ function renderLandingPage() {
                 <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center">
                     <span>🔴 <b>Admin:</b> admin@mistri.com / Admin@123</span>
                     <span>🟡 <b>Staff:</b> raju@mistri.com / Staff@123</span>
-                    <span>🟢 <b>Customer:</b> arun@example.com / Customer@123</span>
+                    <span>🟢 <b>Customer:</b> arun@gmail.com / Customer@123</span>
                 </div>
             </div>
         </div>
     `);
 }
 
-/** Login Page — New Split Panel Design with Google Button */
+/** Login Page */
 function renderLogin() {
     document.getElementById('navbar').style.display = 'none';
     setContent(`
@@ -103,22 +100,26 @@ function renderLogin() {
                     <div class="auth-title">Welcome Back 👋</div>
                     <div class="auth-sub">Sign in to your Mistri account</div>
 
-                    <!-- Gmail / Google Button -->
+                    <!-- Google Sign-In Button -->
                     <button class="btn btn-google" onclick="handleGoogleLogin()" id="google-btn">
                         <span class="google-icon"></span>
-                        Continue with Gmail
+                        Continue with Google
                     </button>
 
                     <div class="auth-divider">or sign in with email</div>
 
-                    <form id="login-form" onsubmit="handleLogin(event)">
+                    <form id="login-form" onsubmit="handleLogin(event)" novalidate>
                         <div class="form-group">
                             <label class="form-label">Email Address</label>
-                            <input type="email" class="form-control" id="login-email" placeholder="you@gmail.com" required>
+                            <input type="email" class="form-control" id="login-email" placeholder="you@gmail.com or admin@mistri.com" required>
+                            <div class="field-error" id="login-email-err" style="display:none;color:var(--danger);font-size:0.78rem;margin-top:4px"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Password</label>
-                            <input type="password" class="form-control" id="login-password" placeholder="••••••••" required>
+                            <div style="position:relative">
+                                <input type="password" class="form-control" id="login-password" placeholder="••••••••" required style="padding-right:44px">
+                                <button type="button" onclick="togglePasswordVisibility('login-password', 'pw-eye-1')" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--text-muted)" id="pw-eye-1">👁</button>
+                            </div>
                         </div>
                         <button type="submit" class="btn btn-primary w-full" id="login-btn" style="margin-top:8px">
                             🔑 Sign In
@@ -138,7 +139,7 @@ function renderLogin() {
                         <div style="display:flex;flex-direction:column;gap:5px">
                             <a onclick="quickLogin('admin@mistri.com','Admin@123')" style="cursor:pointer;color:var(--danger)">🔴 Login as Admin</a>
                             <a onclick="quickLogin('raju@mistri.com','Staff@123')" style="cursor:pointer;color:var(--warning)">🟡 Login as Staff</a>
-                            <a onclick="quickLogin('arun@example.com','Customer@123')" style="cursor:pointer;color:var(--success)">🟢 Login as Customer</a>
+                            <a onclick="quickLogin('arun@gmail.com','Customer@123')" style="cursor:pointer;color:var(--success)">🟢 Login as Customer</a>
                         </div>
                     </div>
                 </div>
@@ -150,7 +151,7 @@ function renderLogin() {
 async function handleLogin(e) {
     e.preventDefault();
     const btn = document.getElementById('login-btn');
-    const email = document.getElementById('login-email').value;
+    const email = document.getElementById('login-email').value.trim();
     const password = document.getElementById('login-password').value;
     btn.innerHTML = '<div class="spinner"></div> Signing in...';
     btn.disabled = true;
@@ -168,13 +169,118 @@ async function handleLogin(e) {
 async function quickLogin(email, password) {
     document.getElementById('login-email').value = email;
     document.getElementById('login-password').value = password;
-    const btn = document.getElementById('login-btn');
-    btn.click();
+    document.getElementById('login-btn').click();
 }
 
-function handleGoogleLogin() {
-    // Show a toast explaining Gmail login is a UI demo (would need OAuth backend in production)
-    showToast('Gmail login coming soon! Please use email & password for now.', 'info');
+async function handleGoogleLogin() {
+    const btn = document.getElementById('google-btn') || document.getElementById('google-reg-btn');
+    if (btn) {
+        btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Redirecting to Google...';
+        btn.disabled = true;
+    }
+    try {
+        const res = await api.get('/auth/google/url');
+        if (res.url) {
+            // Open Google OAuth in a popup window
+            const popup = window.open(res.url, 'google_oauth', 'width=500,height=600,scrollbars=yes');
+            // Listen for message from popup
+            const handleMessage = (event) => {
+                if (event.data && event.data.type === 'google_auth_success') {
+                    window.removeEventListener('message', handleMessage);
+                    api.setToken(event.data.token, {
+                        name: event.data.name,
+                        role: event.data.role,
+                        user_id: event.data.user_id
+                    });
+                    showToast(`Welcome, ${event.data.name}! 🎉`, 'success');
+                    router.redirectByRole(event.data.role);
+                    if (popup && !popup.closed) popup.close();
+                }
+            };
+            window.addEventListener('message', handleMessage);
+            // If popup is blocked, fallback to redirect
+            if (!popup) {
+                window.location.href = res.url;
+            }
+        } else {
+            throw new Error('Could not get Google login URL');
+        }
+    } catch (err) {
+        showToast(err.message || 'Google Sign-In not available. Please use email & password.', 'error');
+        if (btn) {
+            btn.innerHTML = '<span class="google-icon"></span> Continue with Google';
+            btn.disabled = false;
+        }
+    }
+}
+
+function togglePasswordVisibility(inputId, btnId) {
+    const input = document.getElementById(inputId);
+    const btn = document.getElementById(btnId);
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '🙈';
+    } else {
+        input.type = 'password';
+        btn.textContent = '👁';
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers (frontend mirrors backend)
+// ---------------------------------------------------------------------------
+
+function validateGmail(email) {
+    const pattern = /^[a-zA-Z0-9._%+\-]+@gmail\.com$/i;
+    return pattern.test(email.trim());
+}
+
+function validateIndianPhone(phone) {
+    if (!phone || !phone.trim()) return true; // optional
+    const digits = phone.trim().replace(/[\s\-\+()]/g, '');
+    const cleaned = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
+    return /^[6-9][0-9]{9}$/.test(cleaned);
+}
+
+function checkPasswordStrength(password) {
+    const checks = {
+        length: password.length >= 8,
+        upper: /[A-Z]/.test(password),
+        lower: /[a-z]/.test(password),
+        digit: /[0-9]/.test(password),
+        special: /[!@#$%^&*()_+\-=\[\]{};:'"|,.<>?/\\`~]/.test(password)
+    };
+    const passed = Object.values(checks).filter(Boolean).length;
+    return { checks, passed, strong: passed === 5 };
+}
+
+function renderPasswordStrengthUI(password, containerId) {
+    const { checks, passed } = checkPasswordStrength(password);
+    const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+    const labels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
+    const color = colors[Math.max(0, passed - 1)];
+    const label = labels[Math.max(0, passed - 1)];
+
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.innerHTML = `
+        <div style="margin-top:6px">
+            <div style="display:flex;gap:3px;margin-bottom:4px">
+                ${[1,2,3,4,5].map(i => `<div style="height:4px;flex:1;border-radius:2px;background:${i <= passed ? color : 'var(--border)'}"></div>`).join('')}
+            </div>
+            <div style="font-size:0.72rem;color:${color};font-weight:600;margin-bottom:6px">${password ? label : ''}</div>
+            <div style="display:flex;flex-direction:column;gap:3px;font-size:0.72rem">
+                ${[
+                    [checks.length, '8+ characters'],
+                    [checks.upper, 'Uppercase letter (A-Z)'],
+                    [checks.lower, 'Lowercase letter (a-z)'],
+                    [checks.digit, 'Number (0-9)'],
+                    [checks.special, 'Special character (!@#$%...)']
+                ].map(([ok, text]) => `<div style="color:${ok ? '#22c55e' : 'var(--text-muted)'}">${ok ? '✓' : '○'} ${text}</div>`).join('')}
+            </div>
+        </div>
+    `;
 }
 
 /** Register Page */
@@ -205,36 +311,46 @@ function renderRegister() {
             <div class="auth-right">
                 <div class="auth-card">
                     <div class="auth-title">Create Account 🚀</div>
-                    <div class="auth-sub">Join Mistri to manage your repair shop</div>
+                    <div class="auth-sub">Join Mistri to track your repairs</div>
 
-                    <!-- Gmail / Google Button -->
+                    <!-- Google Sign-Up Button -->
                     <button class="btn btn-google" onclick="handleGoogleLogin()" id="google-reg-btn">
                         <span class="google-icon"></span>
-                        Sign up with Gmail
+                        Sign up with Google
                     </button>
 
                     <div class="auth-divider">or register with email</div>
 
-                    <form id="register-form" onsubmit="handleRegister(event)">
+                    <form id="register-form" onsubmit="handleRegister(event)" novalidate>
                         <div class="form-group">
-                            <label class="form-label">Full Name</label>
-                            <input type="text" class="form-control" id="reg-name" placeholder="Ramesh Kumar" required>
+                            <label class="form-label">Full Name *</label>
+                            <input type="text" class="form-control" id="reg-name" placeholder="Ramesh Kumar" required minlength="2">
+                            <div class="field-error" id="reg-name-err" style="display:none;color:var(--danger);font-size:0.78rem;margin-top:4px"></div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Email Address</label>
-                                <input type="email" class="form-control" id="reg-email" placeholder="you@gmail.com" required>
+                                <label class="form-label">Gmail Address *</label>
+                                <input type="email" class="form-control" id="reg-email" placeholder="yourname@gmail.com"
+                                    required oninput="validateGmailField(this.value)">
+                                <div class="field-error" id="reg-email-err" style="display:none;color:var(--danger);font-size:0.78rem;margin-top:4px"></div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Phone</label>
-                                <input type="tel" class="form-control" id="reg-phone" placeholder="+91 98000 00000">
+                                <label class="form-label">Phone (10 digits)</label>
+                                <input type="tel" class="form-control" id="reg-phone" placeholder="9876543210"
+                                    oninput="validatePhoneField(this.value)" maxlength="13">
+                                <div class="field-error" id="reg-phone-err" style="display:none;color:var(--danger);font-size:0.78rem;margin-top:4px"></div>
                             </div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Password</label>
-                            <input type="password" class="form-control" id="reg-password" placeholder="Min 6 characters" required minlength="6">
+                            <label class="form-label">Password *</label>
+                            <div style="position:relative">
+                                <input type="password" class="form-control" id="reg-password" placeholder="Min 8 chars, includes A-Z, 0-9, !@#"
+                                    required oninput="renderPasswordStrengthUI(this.value, 'pw-strength')" style="padding-right:44px">
+                                <button type="button" onclick="togglePasswordVisibility('reg-password', 'pw-eye-2')" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--text-muted)" id="pw-eye-2">👁</button>
+                            </div>
+                            <div id="pw-strength"></div>
                         </div>
-                        <button type="submit" class="btn btn-primary w-full" id="register-btn" style="margin-top:8px">
+                        <button type="submit" class="btn btn-primary w-full" id="register-btn" style="margin-top:12px">
                             🚀 Create Account
                         </button>
                     </form>
@@ -245,23 +361,85 @@ function renderRegister() {
                     <div class="auth-switch" style="margin-top:6px">
                         <a onclick="router.navigate('/')">← Back to home</a>
                     </div>
+                    <div style="margin-top:12px;padding:10px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:0.75rem;color:var(--text-muted)">
+                        <b>📧 Gmail required:</b> Customers must register with a Gmail address (@gmail.com).<br>
+                        <b>🔒 Password requirements:</b> 8+ chars, uppercase, lowercase, number & special character.
+                    </div>
                 </div>
             </div>
         </div>
     `);
 }
 
+function validateGmailField(value) {
+    const errEl = document.getElementById('reg-email-err');
+    if (!errEl) return;
+    if (!value) { errEl.style.display = 'none'; return; }
+    if (!validateGmail(value)) {
+        errEl.textContent = '❌ Please enter a valid Gmail address (e.g. yourname@gmail.com)';
+        errEl.style.display = 'block';
+    } else {
+        errEl.textContent = '✓ Valid Gmail address';
+        errEl.style.color = 'var(--success)';
+        errEl.style.display = 'block';
+    }
+}
+
+function validatePhoneField(value) {
+    const errEl = document.getElementById('reg-phone-err');
+    if (!errEl) return;
+    if (!value || !value.trim()) { errEl.style.display = 'none'; return; }
+    if (!validateIndianPhone(value)) {
+        errEl.textContent = '❌ Enter a valid 10-digit Indian mobile number (starts with 6-9)';
+        errEl.style.color = 'var(--danger)';
+        errEl.style.display = 'block';
+    } else {
+        errEl.textContent = '✓ Valid mobile number';
+        errEl.style.color = 'var(--success)';
+        errEl.style.display = 'block';
+    }
+}
+
 async function handleRegister(e) {
     e.preventDefault();
     const btn = document.getElementById('register-btn');
+
+    const name = document.getElementById('reg-name').value.trim();
+    const email = document.getElementById('reg-email').value.trim();
+    const phone = document.getElementById('reg-phone').value.trim();
+    const password = document.getElementById('reg-password').value;
+
+    // Frontend validation
+    if (!name || name.length < 2) {
+        showToast('Please enter your full name (at least 2 characters).', 'error');
+        return;
+    }
+    if (!validateGmail(email)) {
+        showToast('Customers must use a valid Gmail address (e.g. yourname@gmail.com).', 'error');
+        return;
+    }
+    if (phone && !validateIndianPhone(phone)) {
+        showToast('Please enter a valid 10-digit Indian mobile number (starts with 6, 7, 8, or 9).', 'error');
+        return;
+    }
+    const pwCheck = checkPasswordStrength(password);
+    if (!pwCheck.strong) {
+        showToast('Password is too weak! It must have: 8+ chars, uppercase, lowercase, number & special character. Example: MyPass@123', 'error');
+        return;
+    }
+
     btn.innerHTML = '<div class="spinner"></div> Creating account...';
     btn.disabled = true;
     try {
+        // Normalize phone: strip country code if present
+        let phoneClean = phone ? phone.replace(/[\s\-\+()]/g, '') : '';
+        if (phoneClean.startsWith('91') && phoneClean.length === 12) phoneClean = phoneClean.slice(2);
+
         const data = {
-            name: document.getElementById('reg-name').value,
-            email: document.getElementById('reg-email').value,
-            phone: document.getElementById('reg-phone').value,
-            password: document.getElementById('reg-password').value,
+            name,
+            email: email.toLowerCase(),
+            phone: phoneClean || null,
+            password,
             role: 'customer'
         };
         const res = await api.register(data);

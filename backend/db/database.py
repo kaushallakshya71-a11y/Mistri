@@ -357,6 +357,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_inv_tx_part ON inventory_transactions(part_id)",
         "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_warranties_job ON warranties(repair_job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_repairs_batch ON repair_jobs(repair_batch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_users_google ON users(google_id)",
     ]
     for idx_sql in indexes:
         try:
@@ -378,6 +380,12 @@ def init_db():
         "ALTER TABLE feedback ADD COLUMN technician_id INTEGER REFERENCES users(id)",
         "ALTER TABLE feedback ADD COLUMN technician_rating INTEGER",
         "ALTER TABLE payments ADD COLUMN status TEXT DEFAULT 'Confirmed'",
+        "ALTER TABLE users ADD COLUMN google_id TEXT",
+        "ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'email'",
+        "ALTER TABLE repair_jobs ADD COLUMN repair_batch_id TEXT",
+        "ALTER TABLE repair_jobs ADD COLUMN video_path TEXT",
+        "ALTER TABLE repair_jobs ADD COLUMN landmark TEXT",
+        "ALTER TABLE repair_jobs ADD COLUMN pincode TEXT",
     ]
     for q in alter_queries:
         try:

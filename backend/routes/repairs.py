@@ -17,6 +17,32 @@ router = APIRouter(prefix="/api/repairs", tags=["repairs"])
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm", "3gp"}
+MAX_VIDEO_SIZE = 50 * 1024 * 1024  # 50MB for videos
+import re
+INDIAN_PINCODE_PATTERN = re.compile(r'^[1-9][0-9]{5}$')  # 6-digit Indian pincode
+
+def validate_pincode(pincode: str) -> None:
+    """Validate 6-digit Indian pincode."""
+    if not pincode:
+        return
+    pincode = pincode.strip()
+    if not INDIAN_PINCODE_PATTERN.match(pincode):
+        raise HTTPException(
+            400,
+            f"Invalid pincode '{pincode}'. Pincode must be exactly 6 digits and cannot start with 0 (e.g. 208001). "
+            "Please enter a valid Indian pincode."
+        )
+
+def validate_address(address: str, field_name: str = "Address") -> None:
+    """Validate that address is meaningful."""
+    if not address or not address.strip():
+        raise HTTPException(400, f"{field_name} cannot be empty. Please enter a valid address.")
+    if len(address.strip()) < 10:
+        raise HTTPException(400, f"{field_name} is too short. Please enter a complete address (min 10 characters).")
+    if len(address.strip()) > 500:
+        raise HTTPException(400, f"{field_name} is too long. Please keep it under 500 characters.")
+
 # Extended Professional Repair Lifecycle
 STATUS_FLOW = [
     "Requested", "Assigned", "Diagnosing", "Approved", "Repairing", "Ready", "Delivered", "Completed"
@@ -64,10 +90,23 @@ async def submit_repair(
     estimated_cost: float = Form(0),
     service_type: str = Form("Store Drop-off"),
     pickup_address: Optional[str] = Form(None),
+    landmark: Optional[str] = Form(None),
+    pincode: Optional[str] = Form(None),
+    repair_batch_id: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
+    video: Optional[UploadFile] = File(None),
     current_user: dict = Depends(get_current_user)
 ):
     """Customer or admin submits a new repair request with validated image uploads."""
+    # Normalize service_type
+    s_type = "Home Pickup" if "home" in service_type.lower() or "pickup" in service_type.lower() else "Store Drop-off"
+    
+    # Validation
+    if s_type == "Home Pickup":
+        validate_address(pickup_address, "pickup_address")
+        if pincode:
+            validate_pincode(pincode)
+
     conn = get_db()
 
     # Create/get device
@@ -105,19 +144,36 @@ async def submit_repair(
             f.write(file_bytes)
         image_path = f"/uploads/{safe_filename}"
 
-    repair_id = generate_repair_id(conn)
+    # Handle video upload
+    video_path = None
+    if video and video.filename:
+        filename_parts = video.filename.rsplit(".", 1)
+        ext = filename_parts[-1].lower() if len(filename_parts) > 1 else ""
+        if ext not in ALLOWED_VIDEO_EXTENSIONS:
+            conn.close()
+            raise HTTPException(400, f"Unsupported video extension '{ext}'. Allowed: MP4, MOV, AVI, MKV, WEBM, 3GP.")
+        
+        file_bytes = await video.read()
+        if len(file_bytes) > MAX_VIDEO_SIZE:
+            conn.close()
+            raise HTTPException(400, "Video size exceeds maximum limit of 50MB.")
+            
+        safe_filename = f"vid_{uuid.uuid4().hex}.{ext}"
+        filepath = os.path.join(UPLOAD_DIR, safe_filename)
+        with open(filepath, "wb") as f:
+            f.write(file_bytes)
+        video_path = f"/uploads/{safe_filename}"
 
-    # Normalize service_type
-    s_type = "Home Pickup" if "home" in service_type.lower() or "pickup" in service_type.lower() else "Store Drop-off"
+    repair_id = generate_repair_id(conn)
 
     cursor = conn.execute("""
         INSERT INTO repair_jobs (repair_id, customer_id, device_id, problem_description,
-                                image_path, estimated_cost, status, priority, shop_id,
-                                service_type, pickup_address)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                image_path, video_path, estimated_cost, status, priority, shop_id,
+                                service_type, pickup_address, landmark, pincode, repair_batch_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (repair_id, current_user["id"], device_id, problem_description,
-          image_path, estimated_cost, "Requested", "Normal", current_user.get("shop_id", 1),
-          s_type, pickup_address))
+          image_path, video_path, estimated_cost, "Requested", "Normal", current_user.get("shop_id", 1),
+          s_type, pickup_address, landmark, pincode, repair_batch_id))
 
     job_db_id = cursor.lastrowid
 
@@ -834,3 +890,159 @@ def get_dashboard_stats(current_user: dict = Depends(require_role("admin"))):
         "daily_revenue": [dict(r) for r in daily_revenue],
         "status_distribution": [dict(r) for r in status_dist]
     }
+
+import uuid as _uuid
+
+# ----------------------------------------------------
+# BATCH: Submit multiple devices in one request
+# ----------------------------------------------------
+class RepairItemRequest(BaseModel):
+    device_type: str
+    brand: str
+    model: str
+    problem_description: str
+    estimated_cost: float = 0
+
+class BatchSubmitRequest(BaseModel):
+    items: List[RepairItemRequest]
+    service_type: str = "Store Drop-off"
+    pickup_address: Optional[str] = None
+    landmark: Optional[str] = None
+    pincode: Optional[str] = None
+
+@router.post("/submit-batch")
+def submit_batch_repair(
+    req: BatchSubmitRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Submit multiple devices/appliances in one repair batch request."""
+    if not req.items:
+        raise HTTPException(400, "Please add at least one device to the repair request.")
+    if len(req.items) > 10:
+        raise HTTPException(400, "Maximum 10 devices allowed in one batch request.")
+
+    # Validate Home Pickup address
+    s_type = "Home Pickup" if "home" in req.service_type.lower() or "pickup" in req.service_type.lower() else "Store Drop-off"
+    if s_type == "Home Pickup":
+        if not req.pickup_address or len(req.pickup_address.strip()) < 10:
+            raise HTTPException(400, "Please provide a complete home address (min 10 characters) for Home Pickup service.")
+        if req.pincode:
+            validate_pincode(req.pincode)
+
+    # Generate batch ID
+    batch_id = f"BATCH-{_uuid.uuid4().hex[:10].upper()}"
+
+    conn = get_db()
+    created_jobs = []
+
+    for item in req.items:
+        # Create/get device
+        device = conn.execute(
+            "SELECT id FROM devices WHERE customer_id=? AND device_type=? AND brand=? AND model=?",
+            (current_user["id"], item.device_type, item.brand, item.model)
+        ).fetchone()
+        if device:
+            device_id = device["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO devices (customer_id, device_type, brand, model) VALUES (?,?,?,?)",
+                (current_user["id"], item.device_type, item.brand, item.model)
+            )
+            device_id = cur.lastrowid
+
+        repair_id = generate_repair_id(conn)
+        full_address = req.pickup_address
+
+        cur = conn.execute("""
+            INSERT INTO repair_jobs
+                (repair_id, customer_id, device_id, problem_description,
+                 estimated_cost, status, priority, shop_id,
+                 service_type, pickup_address, landmark, pincode, repair_batch_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            repair_id, current_user["id"], device_id, item.problem_description,
+            item.estimated_cost, "Requested", "Normal", current_user.get("shop_id", 1),
+            s_type, full_address, req.landmark, req.pincode, batch_id
+        ))
+        job_db_id = cur.lastrowid
+
+        conn.execute("""
+            INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+            VALUES (?,?,?,?,?)
+        """, (job_db_id, None, "Requested", current_user["id"],
+              f"Part of batch {batch_id}: {item.device_type} repair request submitted"))
+
+        created_jobs.append({
+            "id": job_db_id,
+            "repair_id": repair_id,
+            "device_type": item.device_type,
+            "brand": item.brand,
+            "model": item.model,
+            "estimated_cost": item.estimated_cost,
+            "status": "Requested"
+        })
+
+    # Batch-level in-app notification
+    total_est = sum(j["estimated_cost"] for j in created_jobs)
+    conn.execute(
+        "INSERT INTO notifications (user_id, title, message) VALUES (?,?,?)",
+        (current_user["id"],
+         f"Batch Request Received ({len(created_jobs)} devices)",
+         f"Your repair request for {len(created_jobs)} device(s) has been submitted. Batch ID: {batch_id}. Total Estimated: ₹{total_est:,.0f}")
+    )
+
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        user=current_user,
+        action="BATCH_REPAIR_CREATED",
+        entity="repair_jobs",
+        entity_id=batch_id,
+        details={"batch_id": batch_id, "item_count": len(created_jobs), "total_estimated": total_est}
+    )
+
+    return {
+        "batch_id": batch_id,
+        "total_items": len(created_jobs),
+        "total_estimated_cost": total_est,
+        "jobs": created_jobs,
+        "message": f"{len(created_jobs)} repair request(s) submitted successfully in batch {batch_id}!"
+    }
+
+
+@router.get("/batch/{batch_id}")
+def get_batch_repairs(batch_id: str, current_user: dict = Depends(get_current_user)):
+    """Get all repair jobs in a batch, with totals. Customer can only see their own batch."""
+    conn = get_db()
+    jobs = conn.execute("""
+        SELECT rj.*, d.device_type, d.brand, d.model,
+               u.name as customer_name
+        FROM repair_jobs rj
+        JOIN devices d ON rj.device_id = d.id
+        JOIN users u ON rj.customer_id = u.id
+        WHERE rj.repair_batch_id = ?
+        ORDER BY rj.created_at ASC
+    """, (batch_id,)).fetchall()
+    conn.close()
+
+    if not jobs:
+        raise HTTPException(404, "Batch not found.")
+
+    # Access control: customer can only see their own batch
+    if current_user["role"] == "customer":
+        if any(j["customer_id"] != current_user["id"] for j in jobs):
+            raise HTTPException(403, "Access denied.")
+
+    job_list = [dict(j) for j in jobs]
+    total_est = sum((j["estimated_cost"] or 0) for j in job_list)
+    total_actual = sum((j["actual_cost"] or 0) for j in job_list)
+
+    return {
+        "batch_id": batch_id,
+        "total_items": len(job_list),
+        "total_estimated_cost": total_est,
+        "total_actual_cost": total_actual,
+        "jobs": job_list
+    }
+
