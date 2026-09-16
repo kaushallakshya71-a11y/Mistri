@@ -10,7 +10,7 @@ from datetime import datetime
 # Ensure backend directory is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -102,9 +102,10 @@ def health_check():
     }
 
 @app.get("/api/qr/{repair_id}")
-def get_qr_code(repair_id: str):
+def get_qr_code(repair_id: str, request: Request):
     """Generate QR code for a repair tracking URL."""
-    tracking_url = f"http://localhost:8000/track/{repair_id}"
+    base_url = os.environ.get("BASE_URL", str(request.base_url).rstrip("/"))
+    tracking_url = f"{base_url}/track/{repair_id}"
     qr_base64 = generate_qr_base64(tracking_url)
     return {"repair_id": repair_id, "qr_code": qr_base64, "tracking_url": tracking_url}
 

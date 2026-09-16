@@ -74,7 +74,8 @@ def dispatch_repair_status_alert(
     """
     Generates tailored WhatsApp message based on status and records in database.
     """
-    tracking_url = f"http://localhost:8000/track/{repair_id}"
+    base_url = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
+    tracking_url = f"{base_url}/track/{repair_id}"
 
     templates = {
         "Received": (
