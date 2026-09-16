@@ -605,7 +605,14 @@ async function renderCustomerInvoices() {
                                         <td>${statusBadge(b.payment_status)}</td>
                                         <td style="font-size:0.8rem;color:var(--text-muted)">${formatDate(b.created_at)}</td>
                                         <td>
-                                            <a href="/api/bills/${b.id}/pdf" target="_blank" class="btn btn-outline btn-sm">⬇ PDF</a>
+                                            <div class="flex gap-2 items-center">
+                                                <button onclick="api.download('/bills/${b.id}/pdf', 'Invoice-${b.bill_number}.pdf')" class="btn btn-outline btn-sm">⬇ PDF</button>
+                                                ${b.payment_status !== 'Paid' ? `
+                                                    <button onclick="openCustomerUpiPaymentModal(${b.id}, '${b.bill_number}', ${b.total_amount})" class="btn btn-primary btn-sm" style="background:#16a34a;border-color:#16a34a">
+                                                        💳 Pay UPI
+                                                    </button>
+                                                ` : '<span class="badge badge-success" style="font-size:0.75rem">Paid ✅</span>'}
+                                            </div>
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -640,5 +647,82 @@ async function showQRCode(repairId) {
         `;
     } catch (e) {
         showToast('Failed to generate QR code', 'error');
+    }
+}
+
+/** Customer Real UPI QR Payment Modal */
+async function openCustomerUpiPaymentModal(billId, billNumber, amount) {
+    const overlay = showModal(`
+        <div class="modal-header">
+            <span class="modal-title">💳 Real UPI Payment QR</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="text-align:center;padding:10px 0">
+            <div style="font-size:0.9rem;color:var(--text-muted);margin-bottom:4px">Invoice #${billNumber}</div>
+            <div style="font-size:1.8rem;font-weight:800;color:var(--primary);margin-bottom:12px">${formatCurrency(amount)}</div>
+            
+            <div id="upi-qr-box" style="display:flex;justify-content:center;align-items:center;min-height:220px">
+                <div class="spinner" style="margin:auto;width:40px;height:40px"></div>
+            </div>
+
+            <p style="font-size:0.85rem;color:var(--text-secondary);margin-top:12px">
+                Scan with <b>Google Pay, PhonePe, Paytm, BHIM</b> or any UPI App to pay.
+            </p>
+
+            <div id="upi-intent-link-container" style="margin-top:10px"></div>
+
+            <hr class="divider" style="margin:16px 0">
+
+            <div style="text-align:left">
+                <div class="form-group" style="margin-bottom:12px">
+                    <label class="form-label" style="font-size:0.8rem">UPI Reference / UTR Number (Optional)</label>
+                    <input type="text" class="form-control" id="upi-payment-ref" placeholder="e.g. 423987123456">
+                </div>
+                <button class="btn btn-primary w-full" id="confirm-pay-btn" style="background:#16a34a;border-color:#16a34a;padding:10px">
+                    ✅ I Have Paid — Confirm Payment
+                </button>
+            </div>
+        </div>
+    `);
+
+    try {
+        const qrData = await api.get(`/bills/${billId}/upi-qr`);
+        const box = overlay.querySelector('#upi-qr-box');
+        box.innerHTML = `
+            <div style="padding:12px;background:#ffffff;border-radius:12px;display:inline-block;box-shadow:0 4px 12px rgba(0,0,0,0.15)">
+                <img src="data:image/png;base64,${qrData.qr_code}" alt="UPI QR Code" style="width:200px;height:200px;display:block">
+            </div>
+        `;
+
+        if (qrData.upi_intent) {
+            const linkBox = overlay.querySelector('#upi-intent-link-container');
+            linkBox.innerHTML = `
+                <a href="${qrData.upi_intent}" class="btn btn-outline btn-sm" style="display:inline-flex;align-items:center;gap:6px">
+                    📱 Open In UPI App (Mobile)
+                </a>
+            `;
+        }
+
+        const confirmBtn = overlay.querySelector('#confirm-pay-btn');
+        confirmBtn.onclick = async () => {
+            const utr = (overlay.querySelector('#upi-payment-ref')?.value || '').trim();
+            confirmBtn.disabled = true;
+            confirmBtn.innerText = 'Verifying... ⏳';
+            try {
+                await api.post(`/bills/${billId}/pay-online`, {
+                    payment_method: 'UPI',
+                    transaction_id: utr || `UPI-TXN-${Date.now()}`
+                });
+                showToast('Payment successful! Warranty activated & repair marked completed! 🎉', 'success');
+                overlay.remove();
+                renderCustomerInvoices();
+            } catch (err) {
+                confirmBtn.disabled = false;
+                confirmBtn.innerText = '✅ I Have Paid — Confirm Payment';
+                showToast(err.message || 'Payment confirmation failed', 'error');
+            }
+        };
+    } catch (e) {
+        showToast('Failed to load UPI QR: ' + e.message, 'error');
     }
 }

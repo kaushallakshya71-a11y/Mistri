@@ -2,11 +2,12 @@
 Mistri Auth Middleware - JWT verification and role-based access control
 Enhanced with automatic .env loader and secure environment configuration.
 """
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from db.database import get_db
 import os
+from typing import Optional
 from pathlib import Path
 
 # Load .env if present
@@ -25,11 +26,19 @@ if env_file.exists():
 SECRET_KEY = os.getenv("MISTRI_SECRET", "mistri-super-secret-key-2024-change-in-prod")
 ALGORITHM = "HS256"
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Verify JWT token and return current user."""
-    token = credentials.credentials
+async def get_current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Verify JWT token from Authorization header or ?token= query parameter for file downloads."""
+    token = None
+    if credentials and credentials.credentials:
+        token = credentials.credentials
+    elif "token" in request.query_params:
+        token = request.query_params.get("token")
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated. Please login or provide a valid token.")
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         sub = payload.get("sub")

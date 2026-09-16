@@ -17,7 +17,7 @@ async function renderAdminDashboard() {
                             <div class="page-subtitle">Overview of your repair shop performance</div>
                         </div>
                         <div class="flex gap-2">
-                            <a href="/api/reports/export/csv?type=repairs" class="btn btn-outline btn-sm">⬇ Export CSV</a>
+                            <button onclick="api.download('/reports/export/csv?type=repairs', 'mistri_repairs.csv')" class="btn btn-outline btn-sm">⬇ Export CSV</button>
                         </div>
                     </div>
                 </div>
@@ -576,6 +576,11 @@ async function renderGenerateBill(jobId) {
                 </select>
             </div>
         </div>
+        <div class="form-group">
+            <label class="form-label">💳 Shop UPI ID (for QR Code Payment)</label>
+            <input type="text" class="form-control" id="bill-upi" placeholder="e.g. 9876543210@paytm or shop@okhdfcbank" value="mistri@upi">
+            <small style="color:var(--text-muted);font-size:0.75rem">Enter your real Google Pay / PhonePe / Paytm UPI ID to receive payments directly.</small>
+        </div>
         <button class="btn btn-primary w-full" onclick="submitGenerateBill(${jobId})">✅ Generate Invoice</button>
     `);
 }
@@ -587,7 +592,8 @@ async function submitGenerateBill(jobId) {
             labour_charge: parseFloat(document.getElementById('bill-labour').value || 0),
             parts_cost: parseFloat(document.getElementById('bill-parts').value || 0),
             discount: parseFloat(document.getElementById('bill-discount').value || 0),
-            tax_rate: parseFloat(document.getElementById('bill-tax').value || 0)
+            tax_rate: parseFloat(document.getElementById('bill-tax').value || 0),
+            upi_id: (document.getElementById('bill-upi')?.value || '').trim() || undefined
         });
         showToast(`Invoice ${res.bill_number} generated! Total: ${formatCurrency(res.total)}`, 'success');
         document.querySelector('.modal-overlay').remove();
@@ -907,8 +913,8 @@ async function renderAdminReports() {
                             <div class="page-subtitle">Revenue trends, profit margins, turnaround speed & parts usage</div>
                         </div>
                         <div class="flex gap-2">
-                            <a href="/api/reports/export/csv?type=repairs" class="btn btn-outline btn-sm">⬇ Repairs CSV</a>
-                            <a href="/api/reports/export/csv?type=payments" class="btn btn-outline btn-sm">⬇ Payments CSV</a>
+                            <button onclick="api.download('/reports/export/csv?type=repairs', 'mistri_repairs_report.csv')" class="btn btn-outline btn-sm">⬇ Repairs CSV</button>
+                            <button onclick="api.download('/reports/export/csv?type=payments', 'mistri_payments_report.csv')" class="btn btn-outline btn-sm">⬇ Payments CSV</button>
                         </div>
                     </div>
                 </div>
@@ -1142,7 +1148,7 @@ async function renderAdminBills() {
                                     <td style="font-size:0.8rem">${formatDate(b.created_at)}</td>
                                     <td>
                                         <div class="flex gap-2">
-                                            <a href="/api/bills/${b.id}/pdf" target="_blank" class="btn btn-outline btn-sm">⬇ PDF</a>
+                                            <button onclick="api.download('/bills/${b.id}/pdf', 'Invoice-${b.bill_number}.pdf')" class="btn btn-outline btn-sm">⬇ PDF</button>
                                             ${b.payment_status !== 'Paid' ? `<button class="btn btn-success btn-sm" onclick="markPaid(${b.id})">✅ Mark Paid</button>` : ''}
                                             <button class="btn btn-outline btn-sm" onclick="openEditBillModal(${b.id},${b.labour_charge},${b.parts_cost},${b.discount},'${b.payment_status}')">✏️ Edit</button>
                                         </div>

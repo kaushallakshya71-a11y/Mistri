@@ -22,6 +22,7 @@ class BillCreate(BaseModel):
     parts_cost: float = 0
     discount: float = 0
     tax_rate: float = 0.09  # 9% GST
+    upi_id: Optional[str] = None  # Real shop UPI ID (e.g. 9876543210@paytm, name@okhdfcbank)
 
 class OnlinePaymentRequest(BaseModel):
     payment_method: str = "UPI"  # UPI | Card | NetBanking | Razorpay
@@ -56,12 +57,15 @@ def generate_bill(req: BillCreate, current_user: dict = Depends(require_role("ad
     count = conn.execute("SELECT COUNT(*) FROM bills").fetchone()[0] + 1
     bill_number = f"BILL-{year}-{str(count).zfill(4)}"
 
-    # Generate standard NPCI UPI Intent string
-    upi_pa = "mistri@upi"
+    # Generate standard NPCI UPI Intent string with real UPI ID support
     job_shop_id = job["shop_id"] if "shop_id" in job.keys() and job["shop_id"] else 1
-    shop_branch = conn.execute("SELECT upi_id FROM shops WHERE id=?", (job_shop_id,)).fetchone()
-    if shop_branch and shop_branch["upi_id"]:
-        upi_pa = shop_branch["upi_id"]
+    if req.upi_id and req.upi_id.strip():
+        upi_pa = req.upi_id.strip()
+        # Save to shops table so it becomes default
+        conn.execute("UPDATE shops SET upi_id=? WHERE id=?", (upi_pa, job_shop_id))
+    else:
+        shop_branch = conn.execute("SELECT upi_id FROM shops WHERE id=?", (job_shop_id,)).fetchone()
+        upi_pa = shop_branch["upi_id"] if shop_branch and shop_branch["upi_id"] else "mistri@upi"
 
     upi_intent = (
         f"upi://pay?pa={upi_pa}"
@@ -162,6 +166,23 @@ def record_online_payment(bill_id: int, req: OnlinePaymentRequest, current_user:
         INSERT INTO payments (bill_id, amount, payment_method, transaction_id)
         VALUES (?, ?, ?, ?)
     """, (bill_id, bill["total_amount"], req.payment_method, req.transaction_id))
+
+    # Also update repair job status to Completed
+    conn.execute("UPDATE repair_jobs SET status='Completed', updated_at=CURRENT_TIMESTAMP WHERE id=?", (bill["repair_job_id"],))
+
+    # Auto-activate 180-day warranty if not already active
+    existing_war = conn.execute("SELECT id FROM warranties WHERE repair_job_id=?", (bill["repair_job_id"],)).fetchone()
+    if not existing_war:
+        conn.execute("""
+            INSERT INTO warranties (repair_job_id, customer_id, duration_days, start_date, end_date, covered_terms, status)
+            VALUES (?, ?, 180, DATE('now'), DATE('now', '+180 days'), '180-day comprehensive repair warranty covering parts and labour', 'Active')
+        """, (bill["repair_job_id"], bill["customer_id"]))
+
+    # Insert notification for customer
+    conn.execute("""
+        INSERT INTO notifications (user_id, repair_job_id, title, message)
+        VALUES (?, ?, 'Payment Received 🎉', ?)
+    """, (bill["customer_id"], bill["repair_job_id"], f"Payment of ₹{bill['total_amount']:.2f} confirmed! Your 180-day warranty is now active."))
 
     conn.commit()
     conn.close()

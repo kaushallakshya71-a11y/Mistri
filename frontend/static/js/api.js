@@ -51,6 +51,38 @@ const api = {
     patch: (path, data) => api.request(path, { method: 'PATCH', body: data ? JSON.stringify(data) : undefined }),
     delete: (path) => api.request(path, { method: 'DELETE' }),
 
+    /** Download file (PDF, CSV) using auth token and trigger native browser download */
+    async download(path, filename) {
+        try {
+            const token = this.getToken();
+            const headers = {};
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+
+            const url = path.startsWith('http') ? path : `${API_BASE}${path.startsWith('/api') ? path.slice(4) : path}`;
+            const res = await fetch(url, { headers });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ detail: 'Download failed' }));
+                if (typeof showToast === 'function') showToast(err.detail || 'Download failed', 'error');
+                return;
+            }
+            const blob = await res.blob();
+            const blobUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = blobUrl;
+            a.download = filename || 'download';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                a.remove();
+                window.URL.revokeObjectURL(blobUrl);
+            }, 1000);
+            if (typeof showToast === 'function') showToast(`Downloaded ${filename || 'file'}! ✅`, 'success');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast(e.message || 'Download failed', 'error');
+        }
+    },
+
     /** Auth helpers */
     async login(email, password) {
         const res = await this.post('/auth/login', { email, password });
