@@ -58,7 +58,8 @@ def generate_bill(req: BillCreate, current_user: dict = Depends(require_role("ad
 
     # Generate standard NPCI UPI Intent string
     upi_pa = "mistri@upi"
-    shop_branch = conn.execute("SELECT upi_id FROM shops WHERE id=?", (job.get("shop_id", 1),)).fetchone()
+    job_shop_id = job["shop_id"] if "shop_id" in job.keys() and job["shop_id"] else 1
+    shop_branch = conn.execute("SELECT upi_id FROM shops WHERE id=?", (job_shop_id,)).fetchone()
     if shop_branch and shop_branch["upi_id"]:
         upi_pa = shop_branch["upi_id"]
 
@@ -74,7 +75,7 @@ def generate_bill(req: BillCreate, current_user: dict = Depends(require_role("ad
         INSERT INTO bills (bill_number, repair_job_id, customer_id, shop_id, labour_charge,
                           parts_cost, discount, tax, total_amount, payment_status, upi_qr_url)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)
-    """, (bill_number, req.repair_job_id, job["customer_id"], job.get("shop_id", 1),
+    """, (bill_number, req.repair_job_id, job["customer_id"], job_shop_id,
           req.labour_charge, req.parts_cost, req.discount, tax, total, "Pending", upi_intent))
 
     conn.execute("UPDATE repair_jobs SET actual_cost=? WHERE id=?", (total, req.repair_job_id))
