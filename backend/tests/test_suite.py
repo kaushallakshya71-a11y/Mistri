@@ -97,7 +97,7 @@ class TestMistriSystem(unittest.TestCase):
 
     def test_05_dynamic_upi_qr_generation(self):
         """Verify NPCI-compliant UPI URI generation and Base64 QR."""
-        upi_intent = "upi://pay?pa=mistri@upi&pn=Mistri%20Electronics&am=981.00&cu=INR&tn=Invoice-BILL-2026-0001"
+        upi_intent = "upi://pay?pa=mistri@upi&pn=Mistri%20Electrical%2FElectronic&am=981.00&cu=INR&tn=Invoice-BILL-2026-0001"
         self.assertTrue(upi_intent.startswith("upi://pay?"))
         self.assertIn("am=981.00", upi_intent)
         self.assertIn("pa=mistri@upi", upi_intent)

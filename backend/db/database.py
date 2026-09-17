@@ -51,7 +51,10 @@ def init_db():
     # Default Branch
     cursor.execute("""
         INSERT OR IGNORE INTO shops (id, name, address, phone, email, upi_id)
-        VALUES (1, 'Mistri Electronics Main Branch', 'Shop 4, Market Road, Sector 12', '+91-9800000001', 'main@mistri.com', 'mistri@upi')
+        VALUES (1, 'Mistri Electrical/Electronic Main Branch', 'Shop 4, Market Road, Sector 12', '+91-9800000001', 'main@mistri.com', 'mistri@upi')
+    """)
+    cursor.execute("""
+        UPDATE shops SET name='Mistri Electrical/Electronic Main Branch' WHERE id=1 AND name LIKE '%Electronics%'
     """)
 
     # 1. Users Table
@@ -512,6 +515,10 @@ def init_db():
         "ALTER TABLE bills ADD COLUMN offer_discount REAL DEFAULT 0",
         "ALTER TABLE customer_offers ADD COLUMN target_customer_id INTEGER REFERENCES users(id)",
         "ALTER TABLE customer_offers ADD COLUMN valid_from DATE",
+        # User address and location columns for profile completion
+        "ALTER TABLE users ADD COLUMN address TEXT",
+        "ALTER TABLE users ADD COLUMN landmark TEXT",
+        "ALTER TABLE users ADD COLUMN pincode TEXT",
     ]
     for q in alter_queries:
         try:

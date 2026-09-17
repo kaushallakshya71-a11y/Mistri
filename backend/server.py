@@ -1,11 +1,21 @@
 """
-Mistri - Smart Electronics Repair Management System
+Mistri - Smart Electrical/Electronic Repair Management System
 Main FastAPI Server Entry Point with Lifespan Handler, Health Diagnostics, and Comprehensive Routers.
 """
 import os
 import sys
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime
+
+# Load environment variables from .env
+try:
+    from dotenv import load_dotenv
+    backend_dir = Path(__file__).resolve().parent
+    load_dotenv(backend_dir / ".env")
+    load_dotenv(backend_dir.parent / ".env")
+except ImportError:
+    pass
 
 # Ensure backend directory is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -43,7 +53,7 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI app
 app = FastAPI(
     title="Mistri API",
-    description="Smart Electronics & Appliance Repair Management System - Enterprise Edition",
+    description="Smart Electrical/Electronic & Appliance Repair Management System - Enterprise Edition",
     version="1.2.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",

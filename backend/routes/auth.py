@@ -8,13 +8,26 @@ from typing import Optional
 import bcrypt as _bcrypt
 from jose import jwt
 from datetime import datetime, timedelta, date
-from db.database import get_db
-from middleware.auth import SECRET_KEY, ALGORITHM, get_current_user
-from utils.audit import log_audit_event
+from pathlib import Path
 import os
 import re
 import json
+import secrets
+import time
 import urllib.parse
+from db.database import get_db
+from middleware.auth import SECRET_KEY, ALGORITHM, get_current_user
+from utils.audit import log_audit_event
+
+# Load environment variables from .env
+try:
+    from dotenv import load_dotenv
+    _b_dir = Path(__file__).resolve().parent.parent
+    load_dotenv(_b_dir / ".env")
+    load_dotenv(_b_dir.parent / ".env")
+except ImportError:
+    pass
+
 try:
     import httpx
 except ImportError:
@@ -101,6 +114,15 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
     monthly_salary: Optional[float] = None
     is_active: Optional[int] = None
+    address: Optional[str] = None
+    landmark: Optional[str] = None
+    pincode: Optional[str] = None
+
+class CompleteProfileRequest(BaseModel):
+    phone: str
+    address: str
+    landmark: Optional[str] = None
+    pincode: str
 
 class StaffCreateRequest(BaseModel):
     name: str
@@ -172,8 +194,11 @@ def register(req: RegisterRequest):
     conn.close()
 
     token = create_access_token(user_id, req.role)
-    return {"access_token": token, "token_type": "bearer", "role": req.role,
-            "name": req.name.strip(), "user_id": user_id}
+    return {
+        "access_token": token, "token_type": "bearer", "role": req.role,
+        "name": req.name.strip(), "user_id": user_id,
+        "needs_profile_completion": not bool(phone_clean)
+    }
 
 # ---------------------------------------------------------------------------
 # Login
@@ -199,10 +224,16 @@ def login(req: LoginRequest):
     if not _verify_pw(req.password, user["password_hash"]):
         raise HTTPException(401, "Incorrect password. Please try again.")
 
+    has_phone = bool(user["phone"] and str(user["phone"]).strip())
+    has_address = bool(user["address"] and str(user["address"]).strip())
+    has_pincode = bool(user["pincode"] and str(user["pincode"]).strip())
+    needs_profile = (user["role"] == "customer") and (not has_phone or not has_address or not has_pincode)
+
     token = create_access_token(user["id"], user["role"])
     return {
         "access_token": token, "token_type": "bearer",
-        "role": user["role"], "name": user["name"], "user_id": user["id"]
+        "role": user["role"], "name": user["name"], "user_id": user["id"],
+        "needs_profile_completion": needs_profile
     }
 
 # ---------------------------------------------------------------------------
@@ -454,160 +485,337 @@ def update_user(user_id: int, req: UserUpdate, current_user: dict = Depends(get_
     return {"message": "User updated successfully."}
 
 # ---------------------------------------------------------------------------
-# Google OAuth
+# Google OAuth 2.0 / OpenID Connect
 # ---------------------------------------------------------------------------
 
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback")
+_OAUTH_STATES = {}  # state -> timestamp for CSRF protection
+
+def _clean_expired_states():
+    now = time.time()
+    expired = [s for s, ts in _OAUTH_STATES.items() if now - ts > 600]
+    for s in expired:
+        _OAUTH_STATES.pop(s, None)
+
+async def _exchange_google_code(code: str, cfg: dict) -> dict:
+    post_data = {
+        "code": code,
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
+        "redirect_uri": cfg["redirect_uri"],
+        "grant_type": "authorization_code"
+    }
+    if httpx:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post("https://oauth2.googleapis.com/token", data=post_data, timeout=15.0)
+                if resp.status_code == 200:
+                    return resp.json()
+        except Exception:
+            pass
+    # urllib fallback
+    import urllib.request
+    encoded_data = urllib.parse.urlencode(post_data).encode("utf-8")
+    req = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=encoded_data,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Mistri/1.0"}
+    )
+    with urllib.request.urlopen(req, timeout=15.0) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+async def _fetch_google_userinfo(access_token: str) -> dict:
+    if httpx:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=15.0
+                )
+                if resp.status_code == 200:
+                    return resp.json()
+        except Exception:
+            pass
+    # urllib fallback
+    import urllib.request
+    req = urllib.request.Request(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        headers={"Authorization": f"Bearer {access_token}", "User-Agent": "Mistri/1.0"}
+    )
+    with urllib.request.urlopen(req, timeout=15.0) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+def get_google_oauth_config() -> dict:
+    """Retrieve Google OAuth configuration from environment."""
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback").strip()
+    is_configured = bool(client_id and client_secret and not client_id.startswith("your-google-client-id"))
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "is_configured": is_configured
+    }
+
+@router.get("/google/config")
+def google_oauth_config():
+    """Check if Google OAuth is configured on the server."""
+    cfg = get_google_oauth_config()
+    return {
+        "configured": cfg["is_configured"],
+        "client_id": cfg["client_id"] if cfg["is_configured"] else None,
+        "redirect_uri": cfg["redirect_uri"]
+    }
 
 @router.get("/google/url")
 def google_oauth_url():
-    """Return Google OAuth authorization URL for frontend redirect."""
-    if not GOOGLE_CLIENT_ID:
+    """Return Google OAuth authorization URL with secure state token for CSRF protection."""
+    cfg = get_google_oauth_config()
+    if not cfg["is_configured"]:
         raise HTTPException(
             503,
-            "Google Sign-In is not configured. Please contact administrator to set up Google OAuth credentials."
+            "Google Sign-In is not configured. Please contact administrator to set up Google OAuth credentials in .env file."
         )
+    _clean_expired_states()
+    state = secrets.token_urlsafe(32)
+    _OAUTH_STATES[state] = time.time()
+
     params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "client_id": cfg["client_id"],
+        "redirect_uri": cfg["redirect_uri"],
         "response_type": "code",
         "scope": "openid email profile",
+        "state": state,
         "access_type": "offline",
         "prompt": "select_account"
     }
     auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
-    return {"url": auth_url}
+    return {"url": auth_url, "state": state, "configured": True}
 
 @router.get("/google/callback")
-async def google_oauth_callback(code: str, state: Optional[str] = None, error: Optional[str] = None):
-    """Handle Google OAuth callback, verify token, create/find user, return JWT."""
+async def google_oauth_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    """Handle Google OAuth callback, exchange token, link/create user, return JWT and profile completeness."""
+    from fastapi.responses import HTMLResponse
+
+    def _render_error_html(msg: str):
+        safe_msg = json.dumps(msg)
+        return HTMLResponse(content=f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Google Login Error</title></head>
+        <body style="font-family:sans-serif;padding:24px;background:#0d1117;color:#c9d1d9">
+            <script>
+                if (window.opener) {{
+                    window.opener.postMessage({{type:'google_auth_error', message: {safe_msg}}}, '*');
+                    setTimeout(function() {{ window.close(); }}, 2500);
+                }} else {{
+                    setTimeout(function() {{ window.location.href = '/login?error=' + encodeURIComponent({safe_msg}); }}, 2500);
+                }}
+            </script>
+            <div style="background:#161b22;padding:20px;border-radius:8px;border:1px solid #f85149">
+                <h3 style="color:#f85149;margin-top:0">Google Sign-In Failed</h3>
+                <p>{msg}</p>
+                <p style="color:#8b949e;font-size:13px">Returning to login window...</p>
+            </div>
+        </body>
+        </html>
+        """, status_code=400)
+
     if error:
-        raise HTTPException(400, f"Google authentication was cancelled or failed: {error}")
+        return _render_error_html(f"Google authentication was cancelled or failed: {error}")
 
     if not code:
-        raise HTTPException(400, "Missing authorization code from Google.")
+        return _render_error_html("Missing authorization code from Google.")
 
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+    # State validation
+    if state:
+        _clean_expired_states()
+        # If server has recorded states, ensure state is valid
+        if _OAUTH_STATES and state not in _OAUTH_STATES:
+            return _render_error_html("OAuth state mismatch or session expired. Please try signing in again.")
+        _OAUTH_STATES.pop(state, None)
+
+    cfg = get_google_oauth_config()
+    if not cfg["is_configured"]:
         raise HTTPException(503, "Google Sign-In is not configured on the server.")
 
-    if not httpx:
-        raise HTTPException(503, "httpx is not installed for Google OAuth token exchange.")
+    # Exchange code for tokens (httpx with urllib fallback)
+    token_data = None
+    try:
+        token_data = await _exchange_google_code(code, cfg)
+    except Exception as e:
+        return _render_error_html(f"Failed to verify Google credentials: {str(e)}")
 
-    # Exchange code for tokens
-    async with httpx.AsyncClient() as client:
-        token_resp = await client.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri": GOOGLE_REDIRECT_URI,
-                "grant_type": "authorization_code"
-            }
-        )
+    if not token_data or not token_data.get("access_token"):
+        return _render_error_html("Failed to verify Google credentials. The authorization code may be expired or invalid.")
 
-    if token_resp.status_code != 200:
-        raise HTTPException(400, "Failed to verify Google credentials. Please try again.")
+    access_token = token_data.get("access_token")
 
-    token_data = token_resp.json()
-    id_token_str = token_data.get("id_token")
-    if not id_token_str:
-        raise HTTPException(400, "Google did not return an identity token.")
+    # Fetch user profile using userinfo endpoint (httpx with urllib fallback)
+    google_user = None
+    try:
+        google_user = await _fetch_google_userinfo(access_token)
+    except Exception as e:
+        return _render_error_html(f"Could not fetch Google user profile: {str(e)}")
 
-    # Verify the ID token using Google's public keys
-    async with httpx.AsyncClient() as client:
-        userinfo_resp = await client.get(
-            "https://www.googleapis.com/oauth2/v3/userinfo",
-            headers={"Authorization": f"Bearer {token_data.get('access_token')}"}
-        )
-
-    if userinfo_resp.status_code != 200:
-        raise HTTPException(400, "Failed to fetch Google profile information.")
-
-    google_user = userinfo_resp.json()
+    if not google_user:
+        return _render_error_html("Failed to fetch Google profile information.")
     google_id = google_user.get("sub")
     email = google_user.get("email", "").strip().lower()
-    name = google_user.get("name", email.split("@")[0])
+    name = google_user.get("name", email.split("@")[0] if email else "Customer")
     email_verified = google_user.get("email_verified", False)
 
     if not email or not google_id:
-        raise HTTPException(400, "Google did not provide a valid email address.")
+        return _render_error_html("Google did not provide a valid email address.")
 
     if not email_verified:
-        raise HTTPException(400, "Your Google email address is not verified. Please verify your Google account first.")
+        return _render_error_html("Your Google email address is not verified. Please verify your Google account first.")
 
-    # Check if Gmail (customers should use Gmail)
+    # Enforce Gmail address format for customer sign in
     if not email.endswith("@gmail.com"):
-        raise HTTPException(
-            400,
-            "Please use a Gmail account (ending with @gmail.com) to sign in with Google."
-        )
+        return _render_error_html("Please use a Gmail account (ending with @gmail.com) to sign in with Google.")
 
     conn = get_db()
 
     # Find existing user by google_id or email
-    existing = conn.execute(
+    row = conn.execute(
         "SELECT * FROM users WHERE google_id=? OR email=?", (google_id, email)
     ).fetchone()
+    existing = dict(row) if row else None
+
+    needs_profile_completion = False
 
     if existing:
-        # Link Google account if not already linked
-        if not existing["google_id"]:
-            conn.execute(
-                "UPDATE users SET google_id=?, auth_provider='google' WHERE id=?",
-                (google_id, existing["id"])
-            )
-            conn.commit()
         user_id = existing["id"]
         role = existing["role"]
         user_name = existing["name"]
+        curr_provider = existing["auth_provider"] or "email"
+
+        # Check if deactivated
+        if existing.get("is_active") == 0:
+            conn.close()
+            return _render_error_html("Your account has been deactivated. Please contact administrator.")
+
+        # Link Google account if not already linked
+        if not existing["google_id"]:
+            new_provider = "email+google" if "email" in curr_provider else "google"
+            conn.execute(
+                "UPDATE users SET google_id=?, auth_provider=? WHERE id=?",
+                (google_id, new_provider, user_id)
+            )
+            conn.commit()
+
+        # Check profile completion (phone, address, pincode)
+        has_phone = bool(existing["phone"] and str(existing["phone"]).strip())
+        has_address = bool(existing["address"] and str(existing["address"]).strip())
+        has_pincode = bool(existing["pincode"] and str(existing["pincode"]).strip())
+        if role == "customer" and (not has_phone or not has_address or not has_pincode):
+            needs_profile_completion = True
     else:
-        # Create new customer account
+        # Create new customer account strictly with role='customer'
         cursor = conn.execute(
-            "INSERT INTO users (name, email, google_id, password_hash, role, auth_provider) VALUES (?,?,?,?,?,?)",
-            (name, email, google_id, "", "customer", "google")
+            """INSERT INTO users (name, email, google_id, password_hash, role, auth_provider)
+               VALUES (?, ?, ?, '', 'customer', 'google')""",
+            (name, email, google_id)
         )
         conn.commit()
         user_id = cursor.lastrowid
         role = "customer"
         user_name = name
+        needs_profile_completion = True
 
     conn.close()
 
-    # Generate app JWT
+    # Generate Mistri JWT token
     token = create_access_token(user_id, role)
 
-    # Return HTML page that posts token to parent window / redirects
+    # Return HTML that stores credentials and notifies parent window or redirects
     html = f"""
     <!DOCTYPE html>
     <html>
     <head><title>Logging in...</title></head>
-    <body>
+    <body style="font-family:sans-serif;padding:24px;background:#0d1117;color:#c9d1d9;text-align:center">
         <script>
-            var token = {json.dumps(token)};
-            var role = {json.dumps(role)};
-            var name = {json.dumps(user_name)};
-            var userId = {json.dumps(user_id)};
-            // Store in localStorage
-            localStorage.setItem('mistri_token', token);
-            localStorage.setItem('mistri_user', JSON.stringify({{name: name, role: role, user_id: userId}}));
-            // If opened in popup, notify parent
+            var authData = {{
+                type: 'google_auth_success',
+                token: {json.dumps(token)},
+                role: {json.dumps(role)},
+                name: {json.dumps(user_name)},
+                user_id: {json.dumps(user_id)},
+                needs_profile_completion: {json.dumps(needs_profile_completion)}
+            }};
+            localStorage.setItem('mistri_token', authData.token);
+            localStorage.setItem('mistri_user', JSON.stringify({{
+                name: authData.name,
+                role: authData.role,
+                user_id: authData.user_id,
+                needs_profile_completion: authData.needs_profile_completion
+            }}));
             if (window.opener) {{
-                window.opener.postMessage({{type:'google_auth_success', token, role, name, user_id: userId}}, '*');
+                window.opener.postMessage(authData, '*');
                 window.close();
             }} else {{
-                // Direct redirect
-                if (role === 'admin') window.location.href = '/admin';
-                else if (role === 'staff') window.location.href = '/staff';
-                else window.location.href = '/customer';
+                if (authData.needs_profile_completion) {{
+                    window.location.href = '/customer?complete_profile=1';
+                }} else if (authData.role === 'admin') {{
+                    window.location.href = '/admin';
+                }} else if (authData.role === 'staff') {{
+                    window.location.href = '/staff';
+                }} else {{
+                    window.location.href = '/customer';
+                }}
             }}
         </script>
-        <p>Logging you in... Please wait.</p>
+        <p>Logging you in securely... Please wait.</p>
     </body>
     </html>
     """
-
-    from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html)
+
+# ---------------------------------------------------------------------------
+# Complete Profile (Customer Phone, Address, Landmark, Pincode)
+# ---------------------------------------------------------------------------
+
+@router.post("/complete-profile")
+def complete_profile(req: CompleteProfileRequest, current_user: dict = Depends(get_current_user)):
+    """Complete customer profile with phone, address, and pincode."""
+    # 1. Validate Indian phone
+    validate_phone(req.phone.strip())
+
+    # 2. Validate Indian 6-digit PIN code
+    pin_clean = req.pincode.strip()
+    if not re.match(r'^[1-9][0-9]{5}$', pin_clean):
+        raise HTTPException(
+            400,
+            "Please enter a valid 6-digit Indian PIN code (e.g. 110001, 302001)."
+        )
+
+    # 3. Validate address
+    addr_clean = req.address.strip()
+    if len(addr_clean) < 5:
+        raise HTTPException(
+            400,
+            "Address must be at least 5 characters long."
+        )
+
+    # Clean phone digits
+    phone_digits = re.sub(r'[\s\-\+()]', '', req.phone.strip())
+    if phone_digits.startswith('91') and len(phone_digits) == 12:
+        phone_digits = phone_digits[2:]
+
+    conn = get_db()
+    conn.execute("""
+        UPDATE users
+        SET phone=?, address=?, landmark=?, pincode=?
+        WHERE id=?
+    """, (phone_digits, addr_clean, req.landmark.strip() if req.landmark else None, pin_clean, current_user["id"]))
+    conn.commit()
+
+    updated = conn.execute("SELECT * FROM users WHERE id=?", (current_user["id"],)).fetchone()
+    conn.close()
+
+    return {
+        "message": "Profile completed successfully.",
+        "user": {k: v for k, v in dict(updated).items() if k not in ("password_hash",)}
+    }

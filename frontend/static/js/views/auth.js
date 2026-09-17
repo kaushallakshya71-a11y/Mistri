@@ -172,17 +172,187 @@ async function quickLogin(email, password) {
     document.getElementById('login-btn').click();
 }
 
+function showGoogleOAuthConfigModal() {
+    const existing = document.getElementById('google-config-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'google-config-modal';
+    modal.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 99999; padding: 20px; backdrop-filter: blur(4px);
+    `;
+    modal.innerHTML = `
+        <div style="background: var(--bg-card, #161b22); border: 1px solid var(--border, #30363d); border-radius: 12px; max-width: 520px; width: 100%; padding: 24px; box-shadow: 0 16px 32px rgba(0,0,0,0.5);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h3 style="margin:0; font-size:1.2rem; display:flex; align-items:center; gap:8px;">
+                    <span>⚙️</span> Google OAuth Setup Required
+                </h3>
+                <button onclick="document.getElementById('google-config-modal').remove()" style="background:transparent;border:none;color:var(--text-muted,#8b949e);font-size:1.4rem;cursor:pointer;">&times;</button>
+            </div>
+            <p style="color:var(--text-secondary,#c9d1d9); font-size:0.9rem; line-height:1.5; margin-bottom:16px;">
+                Google Sign-In requires OAuth 2.0 credentials from Google Cloud Console. To enable it:
+            </p>
+            <div style="background:var(--bg-input, #0d1117); border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:0.85rem; line-height:1.6; color:#58a6ff; font-family:monospace;">
+                1. Open <b>backend/.env</b><br>
+                2. Set <b>GOOGLE_CLIENT_ID</b>=&lt;your_client_id&gt;<br>
+                3. Set <b>GOOGLE_CLIENT_SECRET</b>=&lt;your_client_secret&gt;<br>
+                4. Restart server
+            </div>
+            <div style="font-size:0.85rem; color:var(--text-muted,#8b949e); margin-bottom:20px;">
+                Authorized redirect URI should be:<br>
+                <code style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;">http://localhost:8000/api/auth/google/callback</code>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button class="btn btn-primary" onclick="document.getElementById('google-config-modal').remove()">Understood</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+window.showCompleteProfileModal = function(userName, role) {
+    const existing = document.getElementById('complete-profile-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'complete-profile-modal';
+    modal.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 99999; padding: 20px; backdrop-filter: blur(4px);
+    `;
+    modal.innerHTML = `
+        <div style="background: var(--bg-card, #161b22); border: 1px solid var(--border, #30363d); border-radius: 12px; max-width: 500px; width: 100%; padding: 24px; box-shadow: 0 16px 32px rgba(0,0,0,0.5);">
+            <div style="text-align:center; margin-bottom:20px;">
+                <div style="font-size:2.4rem; margin-bottom:8px;">📍</div>
+                <h3 style="margin:0; font-size:1.3rem;">Complete Your Profile</h3>
+                <p style="color:var(--text-muted,#8b949e); font-size:0.85rem; margin-top:6px;">
+                    Hi ${userName || 'Customer'}, please provide your contact and address details to book and track electrical/electronic appliance repairs smoothly.
+                </p>
+            </div>
+            <div id="profile-modal-error" style="display:none; background:rgba(248,81,73,0.15); border:1px solid #f85149; color:#ff7b72; padding:10px 12px; border-radius:6px; font-size:0.85rem; margin-bottom:16px;"></div>
+            
+            <form id="complete-profile-form" onsubmit="submitCompleteProfile(event, '${role || 'customer'}')">
+                <div class="form-group" style="margin-bottom:14px;">
+                    <label style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:6px;">
+                        Mobile Number <span style="color:var(--danger,#f85149)">*</span>
+                    </label>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="background:var(--bg-input,#0d1117); border:1px solid var(--border,#30363d); padding:8px 12px; border-radius:6px; font-size:0.9rem; color:var(--text-muted,#8b949e)">+91</span>
+                        <input type="tel" id="cp-phone" class="form-control" placeholder="9876543210" maxlength="10" required style="flex:1;">
+                    </div>
+                    <small style="color:var(--text-muted,#8b949e); font-size:0.75rem;">10-digit Indian mobile number</small>
+                </div>
+
+                <div class="form-group" style="margin-bottom:14px;">
+                    <label style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:6px;">
+                        Complete Address <span style="color:var(--danger,#f85149)">*</span>
+                    </label>
+                    <textarea id="cp-address" class="form-control" placeholder="House/Flat no, Building, Street, Colony/Sector" rows="2" required style="resize:none;"></textarea>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
+                    <div class="form-group">
+                        <label style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:6px;">Landmark (Optional)</label>
+                        <input type="text" id="cp-landmark" class="form-control" placeholder="Near Temple / Park">
+                    </div>
+                    <div class="form-group">
+                        <label style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:6px;">
+                            PIN Code <span style="color:var(--danger,#f85149)">*</span>
+                        </label>
+                        <input type="text" id="cp-pincode" class="form-control" placeholder="110001" maxlength="6" required>
+                    </div>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="submit" id="cp-submit-btn" class="btn btn-primary" style="width:100%; justify-content:center;">
+                        Save &amp; Continue to Dashboard
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(modal);
+};
+
+window.submitCompleteProfile = async function(event, role) {
+    event.preventDefault();
+    const phone = document.getElementById('cp-phone').value.trim();
+    const address = document.getElementById('cp-address').value.trim();
+    const landmark = document.getElementById('cp-landmark').value.trim();
+    const pincode = document.getElementById('cp-pincode').value.trim();
+    const errBox = document.getElementById('profile-modal-error');
+    const btn = document.getElementById('cp-submit-btn');
+
+    // Validate phone
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+        errBox.textContent = 'Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.';
+        errBox.style.display = 'block';
+        return;
+    }
+    // Validate address
+    if (address.length < 5) {
+        errBox.textContent = 'Please enter your complete address (at least 5 characters).';
+        errBox.style.display = 'block';
+        return;
+    }
+    // Validate pincode
+    if (!/^[1-9]\d{5}$/.test(pincode)) {
+        errBox.textContent = 'Please enter a valid 6-digit Indian PIN code.';
+        errBox.style.display = 'block';
+        return;
+    }
+
+    errBox.style.display = 'none';
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px"></div> Saving...';
+
+    try {
+        const res = await api.post('/auth/complete-profile', {
+            phone, address, landmark: landmark || null, pincode
+        });
+        const currentUser = api.getUser() || {};
+        currentUser.phone = phone;
+        currentUser.address = address;
+        currentUser.landmark = landmark;
+        currentUser.pincode = pincode;
+        currentUser.needs_profile_completion = false;
+        localStorage.setItem('mistri_user', JSON.stringify(currentUser));
+
+        const modal = document.getElementById('complete-profile-modal');
+        if (modal) modal.remove();
+
+        showToast('Profile completed successfully! Welcome to Mistri 🎉', 'success');
+        router.redirectByRole(role || 'customer');
+    } catch (err) {
+        errBox.textContent = err.message || 'Failed to update profile. Please try again.';
+        errBox.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Save & Continue to Dashboard';
+    }
+};
+
 async function handleGoogleLogin() {
     const btn = document.getElementById('google-btn') || document.getElementById('google-reg-btn');
     if (btn) {
-        btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Redirecting to Google...';
+        btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Connecting to Google...';
         btn.disabled = true;
     }
     try {
         const res = await api.get('/auth/google/url');
         if (res.url) {
             // Open Google OAuth in a popup window
-            const popup = window.open(res.url, 'google_oauth', 'width=500,height=600,scrollbars=yes');
+            const width = 520, height = 620;
+            const left = Math.max(0, (window.screen.width - width) / 2);
+            const top = Math.max(0, (window.screen.height - height) / 2);
+            const popup = window.open(
+                res.url,
+                'google_oauth',
+                `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,status=1`
+            );
+
             // Listen for message from popup
             const handleMessage = (event) => {
                 if (event.data && event.data.type === 'google_auth_success') {
@@ -190,26 +360,45 @@ async function handleGoogleLogin() {
                     api.setToken(event.data.token, {
                         name: event.data.name,
                         role: event.data.role,
-                        user_id: event.data.user_id
+                        user_id: event.data.user_id,
+                        needs_profile_completion: event.data.needs_profile_completion
                     });
-                    showToast(`Welcome, ${event.data.name}! 🎉`, 'success');
-                    router.redirectByRole(event.data.role);
                     if (popup && !popup.closed) popup.close();
+
+                    if (event.data.needs_profile_completion) {
+                        window.showCompleteProfileModal(event.data.name, event.data.role);
+                    } else {
+                        showToast(`Welcome, ${event.data.name}! 🎉`, 'success');
+                        router.redirectByRole(event.data.role);
+                    }
+                } else if (event.data && event.data.type === 'google_auth_error') {
+                    window.removeEventListener('message', handleMessage);
+                    showToast(event.data.message || 'Google Sign-In failed.', 'error');
+                    if (popup && !popup.closed) popup.close();
+                    if (btn) {
+                        btn.innerHTML = '<span class="google-icon"></span> Continue with Google';
+                        btn.disabled = false;
+                    }
                 }
             };
             window.addEventListener('message', handleMessage);
-            // If popup is blocked, fallback to redirect
-            if (!popup) {
+
+            // If popup is blocked by browser, fallback to redirect
+            if (!popup || popup.closed || typeof popup.closed === 'undefined') {
                 window.location.href = res.url;
             }
         } else {
             throw new Error('Could not get Google login URL');
         }
     } catch (err) {
-        showToast(err.message || 'Google Sign-In not available. Please use email & password.', 'error');
         if (btn) {
             btn.innerHTML = '<span class="google-icon"></span> Continue with Google';
             btn.disabled = false;
+        }
+        if (err.message && (err.message.includes('not configured') || err.message.includes('503'))) {
+            showGoogleOAuthConfigModal();
+        } else {
+            showToast(err.message || 'Google Sign-In error. Please try email & password.', 'error');
         }
     }
 }

@@ -1,4 +1,4 @@
-# 🔧 Mistri – Smart Electronics Repair Management System
+# 🔧 Mistri – Smart Electrical/Electronic Repair Management System
 
 <p align="center">
   <img src="docs/banner.png" alt="Mistri Banner" width="100%" />
@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Tests-14%2F14%20Passing-brightgreen?style=for-the-badge" />
 </p>
 
-> **Mistri** is an enterprise-grade, full-stack electronics repair shop management platform with bilingual (Hindi/Hinglish) AI-powered cost estimation, smart technician assignment, real-time repair tracking, atomic inventory management, and automated UPI billing.
+> **Mistri** is an enterprise-grade, full-stack electrical/electronic repair shop management platform with bilingual (Hindi/Hinglish) AI-powered cost estimation, smart technician assignment, real-time repair tracking, atomic inventory management, and automated UPI billing.
 
 ---
 

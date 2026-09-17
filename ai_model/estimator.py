@@ -2,7 +2,7 @@
 """
 Mistri AI Reference Model
 Python scikit-learn RandomForestRegressor for repair cost estimation
-Trained across household appliances and electronics.
+Trained across household appliances and electrical/electronic devices.
 """
 
 import os

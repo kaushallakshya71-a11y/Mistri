@@ -102,7 +102,7 @@ REPAIR_DB = {
         "regulator": {
             "keywords": ["regulator", "speed control", "stuck speed", "speed nahi"],
             "parts_cost": (150, 500), "labor_cost": (100, 200), "time": (0.5, 2),
-            "part": "Regulator", "diagnostic": "Faulty electronic speed controller",
+            "part": "Regulator", "diagnostic": "Faulty electrical/electronic speed controller",
             "hinglish": "Fan ka speed regulator (jo speed control karta hai) kharab ho gaya hai. Isko replace karna hoga."
         },
         "bearing": {

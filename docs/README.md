@@ -1,4 +1,4 @@
-# Mistri – Smart Electronics Repair Management System
+# Mistri – Smart Electrical/Electronic Repair Management System
 
 ## 🚀 Quick Start
 

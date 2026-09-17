@@ -75,6 +75,12 @@ async function renderCustomerDashboard() {
                 `}
             </div>
         `);
+
+        if ((window.location.search.includes('complete_profile=1') || (user && user.needs_profile_completion)) && typeof window.showCompleteProfileModal === 'function') {
+            setTimeout(() => {
+                window.showCompleteProfileModal(user.name, user.role);
+            }, 300);
+        }
     } catch (e) {
         showToast(e.message, 'error');
     }

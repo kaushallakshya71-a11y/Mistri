@@ -37,7 +37,7 @@ class NumberedCanvas(canvas.Canvas):
         self.setStrokeColor(colors.HexColor("#e2e8f0"))
         self.setLineWidth(0.5)
         self.line(54, letter[1] - 40, letter[0] - 54, letter[1] - 40)
-        self.drawString(54, letter[1] - 35, "Mistri – Smart Electronics Repair Management System | Project Q&A")
+        self.drawString(54, letter[1] - 35, "Mistri – Smart Electrical/Electronic Repair Management System | Project Q&A")
         
         # Footer
         self.line(54, 45, letter[0] - 54, 45)
@@ -149,15 +149,15 @@ def create_pdf(output_path):
             "num": "1",
             "q": "Project Title & One-Line Summary",
             "points": [
-                "<b>Project Title:</b> Mistri – Smart Electronics & Appliance Repair Management System (Enterprise Edition).",
-                "<b>One-Line Summary:</b> Yeh ek intelligent, multi-role web platform hai jo local electronics repair shops ke unorganized pen-and-paper workflow ko digital banata hai—jisme bilingual (Hindi/English) AI cost estimation, smart technician assignment, real-time repair tracking, atomic inventory management aur automated UPI/WhatsApp billing integrated hai."
+                "<b>Project Title:</b> Mistri – Smart Electrical/Electronic & Appliance Repair Management System (Enterprise Edition).",
+                "<b>One-Line Summary:</b> Yeh ek intelligent, multi-role web platform hai jo local electrical/electronic repair shops ke unorganized pen-and-paper workflow ko digital banata hai—jisme bilingual (Hindi/English) AI cost estimation, smart technician assignment, real-time repair tracking, atomic inventory management aur automated UPI/WhatsApp billing integrated hai."
             ]
         },
         {
             "num": "2",
             "q": "Why did you build it? (Real-World Motivation / Pain Point)",
             "points": [
-                "<b>Trust Issue:</b> Bharat me electronics repair industry 90% unorganized hai. Customers ko repair ka exact kharcha pehle nahi pata hota, baad me dukan wale manmana bill charge karte hain.",
+                "<b>Trust Issue:</b> Bharat me electrical/electronic repair industry 90% unorganized hai. Customers ko repair ka exact kharcha pehle nahi pata hota, baad me dukan wale manmana bill charge karte hain.",
                 "<b>Tracking ki kami:</b> Customer ko repair progress janne ke liye dukan ke baar-baar chakkar lagane padte hain ya call karni padti hai.",
                 "<b>Shop Owner ki pareshani:</b> Spare parts ki chori/stock mismatch, technician par kaunsa job chal raha hai uska record na hona, aur kacchi parchi (paper receipt) kho jane par disputes hona.",
                 "<b>Motivation:</b> Ek aisa transparent system banana jo local shopkeeper (Mistri) aur regular customer dono ki bhasha (Hindi/Hinglish) samajh sake aur ek single portal se repair, stock aur billing sab manage kar sake."
@@ -167,7 +167,7 @@ def create_pdf(output_path):
             "num": "3",
             "q": "Problem Statement (Existing Solutions mein kya khamiyan thi)",
             "points": [
-                "<b>Urban Company Model:</b> Door-step services ke liye hai; local physical electronics shop ke walk-in repair jobs aur spare parts inventory ke liye unsuitable hai.",
+                "<b>Urban Company Model:</b> Door-step services ke liye hai; local physical electrical/electronic shop ke walk-in repair jobs aur spare parts inventory ke liye unsuitable hai.",
                 "<b>Generic ERPs (SAP / Tally):</b> Bahut complex, heavyweight aur expensive hote hain; local technician smartphone se use nahi kar sakta.",
                 "<b>AI ka Lack:</b> Kisi bhi existing software me colloquial Hindi bhasha (<i>'dhuan nikal raha hai'</i>, <i>'awaz kar raha hai'</i>) samajhkar estimated cost batane ka mechanism nahi tha.",
                 "<b>Paper Receipts:</b> Physical slip kho jane par warranty claim ya delivery verify karne ka koi tamper-evident mechanism nahi tha."

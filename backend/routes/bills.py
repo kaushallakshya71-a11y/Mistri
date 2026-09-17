@@ -92,7 +92,7 @@ def generate_bill(req: BillCreate, current_user: dict = Depends(require_role("ad
 
     upi_intent = (
         f"upi://pay?pa={upi_pa}"
-        f"&pn={urllib.parse.quote('Mistri Electronics')}"
+        f"&pn={urllib.parse.quote('Mistri Electrical/Electronic')}"
         f"&am={total:.2f}"
         f"&cu=INR"
         f"&tn={urllib.parse.quote(f'Invoice {bill_number}')}"
@@ -160,7 +160,7 @@ def get_bill_upi_qr(bill_id: int, current_user: dict = Depends(get_current_user)
 
     upi_intent = bill["upi_qr_url"]
     if not upi_intent:
-        upi_intent = f"upi://pay?pa=mistri@upi&pn=Mistri%20Electronics&am={bill['total_amount']:.2f}&cu=INR&tn=Invoice-{bill['bill_number']}"
+        upi_intent = f"upi://pay?pa=mistri@upi&pn=Mistri%20Electrical%2FElectronic&am={bill['total_amount']:.2f}&cu=INR&tn=Invoice-{bill['bill_number']}"
 
     qr_base64 = generate_qr_base64(upi_intent)
     return {
@@ -443,8 +443,8 @@ def download_invoice_pdf(bill_id: int, current_user: dict = Depends(get_current_
     elements = []
 
     # Header
-    elements.append(Paragraph("⚡ MISTRI ELECTRONICS", title_style))
-    elements.append(Paragraph("Smart Electronics & Appliance Repair Management System", subtitle_style))
+    elements.append(Paragraph("⚡ MISTRI ELECTRICAL/ELECTRONIC", title_style))
+    elements.append(Paragraph("Smart Electrical/Electronic & Appliance Repair Management System", subtitle_style))
     elements.append(Spacer(1, 0.3*cm))
     elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#6C63FF')))
     elements.append(Spacer(1, 0.3*cm))
@@ -488,7 +488,7 @@ def download_invoice_pdf(bill_id: int, current_user: dict = Depends(get_current_
 
     if not is_paid:
         # Embed Dynamic Scannable UPI QR Code in PDF!
-        upi_url = bill.get("upi_qr_url") or f"upi://pay?pa=mistri@upi&pn=Mistri%20Electronics&am={bill['total_amount']:.2f}&cu=INR&tn=Invoice-{bill['bill_number']}"
+        upi_url = bill.get("upi_qr_url") or f"upi://pay?pa=mistri@upi&pn=Mistri%20Electrical%2FElectronic&am={bill['total_amount']:.2f}&cu=INR&tn=Invoice-{bill['bill_number']}"
         qr = qrcode.make(upi_url)
         qr_buf = io.BytesIO()
         qr.save(qr_buf, format="PNG")
@@ -721,7 +721,7 @@ def apply_offer_to_bill(bill_id: int, req: ApplyOfferRequest, current_user: dict
     b_num = bill["bill_number"]
     new_upi_intent = (
         f"upi://pay?pa={upi_pa}"
-        f"&pn={urllib.parse.quote('Mistri Electronics')}"
+        f"&pn={urllib.parse.quote('Mistri Electrical/Electronic')}"
         f"&am={total:.2f}"
         f"&cu=INR"
         f"&tn={urllib.parse.quote(f'Invoice {b_num}')}"

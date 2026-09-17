@@ -19,7 +19,7 @@ from routes.warranties import list_warranties
 
 def run_demo():
     print("=" * 70)
-    print("🚀 MISTRI - SMART ELECTRONICS REPAIR MANAGEMENT SYSTEM")
+    print("🚀 MISTRI - SMART ELECTRICAL/ELECTRONIC REPAIR MANAGEMENT SYSTEM")
     print("=" * 70)
 
     # 1. Database & Health Status
