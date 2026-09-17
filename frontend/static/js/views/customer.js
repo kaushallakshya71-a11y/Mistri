@@ -23,6 +23,7 @@ async function renderCustomerDashboard() {
                         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                             ${langToggleBtn()}
                             <button class="btn btn-primary" onclick="router.navigate('/customer/submit')">${t('newRepair')}</button>
+                            <button class="btn btn-outline" onclick="logout()" style="color:var(--danger);border-color:rgba(239,68,68,0.4)">🚪 Logout</button>
                         </div>
                     </div>
                 </div>

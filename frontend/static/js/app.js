@@ -7,6 +7,7 @@
 router.register('/', renderLandingPage);
 router.register('/login', renderLogin);
 router.register('/register', renderRegister);
+router.register('/logout', () => logout());
 
 // Public repair tracker
 router.register('/track/*', renderRepairTracker);

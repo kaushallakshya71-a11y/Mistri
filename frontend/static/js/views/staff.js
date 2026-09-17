@@ -15,8 +15,13 @@ async function renderStaffDashboard() {
         setContent(`
             <div class="page">
                 <div class="page-header">
-                    <div class="page-title">👨‍🔧 My Jobs — ${user.name}</div>
-                    <div class="page-subtitle">${jobs.length} assigned jobs · ${activeJobs.length} active</div>
+                    <div class="flex justify-between items-center flex-wrap gap-2">
+                        <div>
+                            <div class="page-title">👨‍🔧 My Jobs — ${user.name}</div>
+                            <div class="page-subtitle">${jobs.length} assigned jobs · ${activeJobs.length} active</div>
+                        </div>
+                        <button onclick="logout()" class="btn btn-outline btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,0.4)">🚪 Logout</button>
+                    </div>
                 </div>
 
                 <div class="stats-grid">

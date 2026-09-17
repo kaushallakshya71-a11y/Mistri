@@ -18,6 +18,7 @@ async function renderAdminDashboard() {
                         </div>
                         <div class="flex gap-2">
                             <button onclick="api.download('/reports/export/csv?type=repairs', 'mistri_repairs.csv')" class="btn btn-outline btn-sm">⬇ Export CSV</button>
+                            <button onclick="logout()" class="btn btn-outline btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,0.4)">🚪 Logout</button>
                         </div>
                     </div>
                 </div>

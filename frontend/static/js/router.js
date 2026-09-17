@@ -21,8 +21,14 @@ const router = {
     },
 
     resolve(path) {
+        // Special logout action route
+        if (path === '/logout') {
+            logout();
+            return;
+        }
+
         // Auth guard
-        const publicRoutes = ['/', '/login', '/register', '/track'];
+        const publicRoutes = ['/', '/login', '/register', '/track', '/logout'];
         const user = api.getUser();
         const isPublic = publicRoutes.some(r => path === r || path.startsWith('/track'));
 
@@ -31,7 +37,7 @@ const router = {
             return;
         }
 
-        // Role-based redirect after login
+        // Role-based redirect only when explicitly visiting /login or /register while already logged in
         if (api.isLoggedIn() && (path === '/login' || path === '/register')) {
             this.redirectByRole(user?.role);
             return;
@@ -105,12 +111,14 @@ function updateNavbar() {
             { label: '🛡️ Warranties', path: '/admin/warranties' },
             { label: '📜 Audit Logs', path: '/admin/audit-logs' },
             { label: '⭐ Feedback', path: '/admin/feedback' },
+            { label: '🚪 Logout', path: '/logout', isLogout: true },
         ],
         staff: [
             { label: '🏠 My Jobs', path: '/staff' },
             { label: '💼 Salary & Leaves', path: '/staff/leaves' },
             { label: '📦 Inventory', path: '/staff/inventory' },
             { label: '🛒 Shop', path: '/shop' },
+            { label: '🚪 Logout', path: '/logout', isLogout: true },
         ],
         customer: [
             { label: '🏠 Dashboard', path: '/customer' },
@@ -118,6 +126,7 @@ function updateNavbar() {
             { label: '📄 Invoices', path: '/customer/invoices' },
             { label: '🎧 Help & Support', path: '/customer/support' },
             { label: '🛒 Shop', path: '/shop' },
+            { label: '🚪 Logout', path: '/logout', isLogout: true },
         ],
     };
 
@@ -125,6 +134,8 @@ function updateNavbar() {
     const currentPath = router.currentPath;
 
     linksEl.innerHTML = userLinks.map(l =>
+        l.isLogout ?
+        `<button class="nav-link" onclick="logout()" style="color:#ef4444;font-weight:700;margin-left:auto">${l.label}</button>` :
         `<button class="nav-link ${currentPath === l.path ? 'active' : ''}" onclick="router.navigate('${l.path}')">${l.label}</button>`
     ).join('');
 
@@ -144,9 +155,14 @@ async function loadNotifCount() {
 
 function logout() {
     api.clearToken();
-    router.navigate('/login');
-    updateNavbar();
-    showToast('Logged out successfully', 'info');
+    const navbar = document.getElementById('navbar');
+    if (navbar) navbar.style.display = 'none';
+    const dropdown = document.getElementById('user-dropdown');
+    if (dropdown) dropdown.classList.remove('open');
+    router.navigate('/login', true);
+    if (typeof showToast === 'function') {
+        showToast('Logged out successfully', 'info');
+    }
 }
 
 function toggleUserDropdown(event) {
