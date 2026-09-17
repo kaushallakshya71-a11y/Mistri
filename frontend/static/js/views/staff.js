@@ -93,10 +93,12 @@ function renderStaffJobCard(job) {
 async function renderStaffJobDetail(jobId) {
     showLoading();
     try {
-        const [job, inventory] = await Promise.all([
+        const [job, inventory, bills] = await Promise.all([
             api.get(`/repairs/${jobId}`),
-            api.get('/inventory/')
+            api.get('/inventory/'),
+            api.get('/bills/').catch(() => [])
         ]);
+        const jobBill = bills.find(b => b.repair_job_id === jobId);
         const statuses = ['Assigned', 'Diagnosing', 'Approved', 'Repairing', 'Ready', 'Completed', 'On Hold'];
         const partsUsed = job.parts_used ? JSON.parse(job.parts_used) : [];
         const photos = await api.get(`/repairs/${jobId}/photos`).catch(() => []);
@@ -112,6 +114,43 @@ async function renderStaffJobDetail(jobId) {
                         ${statusBadge(job.status)}
                     </div>
                 </div>
+
+                ${job.rejection_reason ? `
+                    <div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-sm);margin-bottom:16px">
+                        <div style="font-weight:700;color:var(--danger)">⚠️ Rejection Notice On Record:</div>
+                        <div style="font-size:0.85rem;margin-top:2px">Reason: <b>${job.rejection_reason}</b></div>
+                        ${job.rejection_notes ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">Notes: ${job.rejection_notes}</div>` : ''}
+                    </div>
+                ` : ''}
+
+                ${job.status === 'Assigned' ? `
+                    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary);background:rgba(99,102,241,0.06)">
+                        <div class="flex justify-between items-center flex-wrap gap-2">
+                            <div>
+                                <div style="font-weight:700;color:var(--primary);font-size:1rem">📌 New Assignment Received</div>
+                                <div style="font-size:0.82rem;color:var(--text-muted)">Please accept to start diagnosis or reject with reason if unable to service.</div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button class="btn btn-primary btn-sm" onclick="staffAcceptJob(${jobId})">✅ Accept & Start Diagnosis</button>
+                                <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="openStaffRejectModal(${jobId})">❌ Reject Job</button>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+
+                ${jobBill && jobBill.payment_status !== 'Paid' ? `
+                    <div class="card" style="margin-bottom:16px;border-left:4px solid #10b981;background:rgba(16,185,129,0.06)">
+                        <div class="flex justify-between items-center flex-wrap gap-2">
+                            <div>
+                                <div style="font-weight:700;color:#10b981">💵 Collect In-Person Cash Payment</div>
+                                <div style="font-size:0.85rem">Bill: <b>${jobBill.bill_number}</b> · Total: <b>${formatCurrency(jobBill.total_amount)}</b> (Status: <b>${jobBill.payment_status}</b>)</div>
+                            </div>
+                            <button class="btn btn-success btn-sm" onclick="openCollectCashModal(${jobBill.id}, ${jobBill.total_amount}, '${jobBill.bill_number}')">
+                                💵 Record Cash Collected
+                            </button>
+                        </div>
+                    </div>
+                ` : ''}
 
                 <!-- Customer Location & Dispatch Info -->
                 <div class="card" style="margin-bottom:16px;border-left:4px solid ${job.service_type === 'Home Pickup' ? '#8b5cf6' : '#0ea5e9'}">
@@ -190,6 +229,14 @@ async function renderStaffJobDetail(jobId) {
                     <button class="btn btn-primary w-full" style="height:46px;font-size:1rem;font-weight:600" onclick="staffUpdateStatus(${jobId})">
                         💾 Update Status & Save Notes
                     </button>
+
+                    ${!['Completed', 'Delivered', 'Cancelled'].includes(job.status) && job.status !== 'Assigned' ? `
+                        <div style="margin-top:12px;display:flex;justify-content:flex-end">
+                            <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,0.4)" onclick="openStaffRejectModal(${jobId})">
+                                ❌ Unable to Complete? Reject / Cancel Job
+                            </button>
+                        </div>
+                    ` : ''}
                 </div>
 
                 <!-- Atomic Parts Consumption -->
@@ -370,6 +417,430 @@ async function renderStaffInventory() {
                 </div>
             </div>
         `);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+/** ─── STAFF REPAIR ACTIONS: ACCEPT & REJECT ──────────────── */
+
+async function staffAcceptJob(jobId) {
+    try {
+        await api.post(`/repairs/${jobId}/accept`);
+        showToast('Job accepted! Status moved to Diagnosing 🛠️', 'success');
+        renderStaffJobDetail(jobId);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function openStaffRejectModal(jobId) {
+    showModal(`
+        <div class="modal-header">
+            <span class="modal-title" style="color:var(--danger)">❌ Reject / Cancel Repair Job</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="padding:10px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);margin-bottom:14px;font-size:0.85rem">
+            <b>Important:</b> The Admin will be notified immediately to reassign this repair. A valid business reason is mandatory.
+        </div>
+        <div class="form-group">
+            <label class="form-label" style="font-weight:600">Select Rejection Reason <span class="text-danger">*</span></label>
+            <select class="form-control" id="reject-reason" style="height:44px" onchange="toggleOtherReasonBox()">
+                <option value="">-- Choose reason --</option>
+                <option value="Skill mismatch (unfamiliar with this device model/circuit)">Skill mismatch (unfamiliar with this device model/circuit)</option>
+                <option value="Required diagnostic tools / equipment unavailable">Required diagnostic tools / equipment unavailable</option>
+                <option value="Spare parts out of stock / unavailable">Spare parts out of stock / unavailable</option>
+                <option value="Excessive active repair workload">Excessive active repair workload</option>
+                <option value="Emergency personal leave">Emergency personal leave</option>
+                <option value="Customer location unreachable">Customer location unreachable</option>
+                <option value="Other">Other (Requires detailed explanation)</option>
+            </select>
+        </div>
+        <div class="form-group" id="reject-notes-group">
+            <label class="form-label" style="font-weight:600">Technician Explanation / Notes <span class="text-danger">*</span></label>
+            <textarea class="form-control" id="reject-notes" rows="3" placeholder="Provide honest details to help the admin reassign effectively..."></textarea>
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Min 10 characters required for custom reasons.</div>
+        </div>
+        <div class="flex gap-2" style="margin-top:16px">
+            <button class="btn btn-outline flex-1" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            <button class="btn btn-danger flex-1" onclick="submitStaffReject(${jobId})">Confirm Rejection</button>
+        </div>
+    `);
+}
+
+function toggleOtherReasonBox() {
+    const reason = document.getElementById('reject-reason').value;
+    const notesGroup = document.getElementById('reject-notes-group');
+    if (reason === 'Other') {
+        notesGroup.querySelector('label').innerHTML = 'Detailed Explanation <span class="text-danger">* (Required)</span>';
+    } else {
+        notesGroup.querySelector('label').innerHTML = 'Technician Explanation / Notes <span style="font-size:0.75rem;color:var(--text-muted)">(Optional)</span>';
+    }
+}
+
+async function submitStaffReject(jobId) {
+    const reason = document.getElementById('reject-reason').value;
+    const notes = document.getElementById('reject-notes').value.trim();
+
+    if (!reason) {
+        showToast('Please select a valid rejection reason.', 'warning');
+        return;
+    }
+    if (reason === 'Other' && notes.length < 10) {
+        showToast('Please provide an explanation of at least 10 characters.', 'warning');
+        return;
+    }
+
+    try {
+        await api.post(`/repairs/${jobId}/reject`, {
+            rejection_reason: reason,
+            rejection_notes: notes || null
+        });
+        showToast('Repair rejected. Admin notified for reassignment.', 'info');
+        document.querySelector('.modal-overlay')?.remove();
+        renderStaffDashboard();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+/** ─── CASH PAYMENT RECORDING ──────────────────────────── */
+
+function openCollectCashModal(billId, amount, billNumber) {
+    showModal(`
+        <div class="modal-header">
+            <span class="modal-title">💵 Collect Cash Payment</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="padding:12px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:var(--radius-sm);margin-bottom:14px">
+            <div style="font-size:0.85rem;color:var(--text-muted)">Invoice: <b>${billNumber}</b></div>
+            <div style="font-size:1.4rem;font-weight:700;color:#10b981;margin:4px 0">${formatCurrency(amount)}</div>
+            <div style="font-size:0.8rem;color:var(--text-secondary)">Please collect the exact cash amount from customer before confirming.</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Receipt / Collection Notes (Optional)</label>
+            <input type="text" class="form-control" id="cash-notes" placeholder="e.g. Paid in 500 notes, customer verified appliance">
+        </div>
+        <div class="flex gap-2" style="margin-top:16px">
+            <button class="btn btn-outline flex-1" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            <button class="btn btn-success flex-1" onclick="submitCollectCash(${billId})">Confirm Cash Collected</button>
+        </div>
+    `);
+}
+
+async function submitCollectCash(billId) {
+    const notes = document.getElementById('cash-notes')?.value || '';
+    try {
+        const res = await api.post(`/bills/${billId}/cash-payment`, { notes });
+        showToast('Cash payment recorded successfully! Warranty activated.', 'success');
+        document.querySelector('.modal-overlay')?.remove();
+        router.navigate('/staff');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+/** ─── STAFF SALARY, LEAVES & TENURE MANAGEMENT ───────── */
+
+async function renderStaffLeavesAndSalary() {
+    showLoading();
+    try {
+        const [summary, leavesRes, bonuses] = await Promise.all([
+            api.get('/staff-mgmt/summary'),
+            api.get('/staff-mgmt/leaves'),
+            api.get('/staff-mgmt/bonuses/' + (api.getUser()?.user_id || api.getUser()?.id)).catch(() => [])
+        ]);
+
+        const user = summary.staff;
+        const policy = summary.leave_policy;
+        const commitment = summary.commitment;
+        const currentMonth = summary.current_month;
+        const leaves = leavesRes || [];
+
+        // Calculate minimum date for 2-day advance notice
+        const minDate = new Date();
+        minDate.setDate(minDate.getDate() + 2);
+        const minDateStr = minDate.toISOString().split('T')[0];
+
+        // Format dates
+        const joinedDateFormatted = user.joining_date ? formatDate(user.joining_date) : 'N/A';
+
+        setContent(`
+            <div class="page" style="max-width:960px;margin:0 auto">
+                <div class="page-header">
+                    <div class="flex justify-between items-center flex-wrap gap-2">
+                        <div>
+                            <div class="page-title">💼 My Salary, Leaves & Commitment</div>
+                            <div class="page-subtitle">Transparent payroll tracking, 4-leave monthly quota & service agreements</div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn btn-outline btn-sm" onclick="openResignationModal('${commitment.status}')">📝 Submit Resignation Notice</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Resignation or Termination Alert Banner -->
+                ${user.resignation_status && user.resignation_status !== 'None' ? `
+                    <div style="padding:12px 16px;background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);border-radius:var(--radius-sm);margin-bottom:18px">
+                        <div style="font-weight:700;color:#eab308">⚠️ Resignation In Progress (${user.resignation_status})</div>
+                        <div style="font-size:0.85rem;margin-top:2px">Notice Filed: <b>${user.resignation_notice_date || 'N/A'}</b> · Proposed Last Date: <b>${user.resignation_last_date || 'N/A'}</b></div>
+                        <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">Reason: ${user.resignation_reason || 'N/A'}</div>
+                    </div>
+                ` : ''}
+
+                ${user.termination_effective_date ? `
+                    <div style="padding:12px 16px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-sm);margin-bottom:18px">
+                        <div style="font-weight:700;color:var(--danger)">🚨 15-Day Exit / Termination Notice Issued</div>
+                        <div style="font-size:0.85rem;margin-top:2px">Notice Date: <b>${user.termination_notice_date}</b> · Effective Exit Date: <b>${user.termination_effective_date}</b></div>
+                    </div>
+                ` : ''}
+
+                <!-- Key Metrics -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-value">${formatCurrency(summary.monthly_salary)}</div>
+                        <div class="stat-label">Monthly Fixed Salary</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Daily Rate: <b>${formatCurrency(summary.daily_rate)}</b> / day</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📅</div>
+                        <div class="stat-value">${policy.approved_leaves_this_month} / ${policy.allowed_leaves_per_month}</div>
+                        <div class="stat-label">Leaves Taken (${currentMonth})</div>
+                        <div style="font-size:0.75rem;color:${policy.unpaid_leaves > 0 ? 'var(--danger)' : 'var(--success)'};margin-top:4px">
+                            ${policy.unpaid_leaves > 0 ? `⚠️ ${policy.unpaid_leaves} unpaid leaves (Deduction: ${formatCurrency(policy.salary_deduction_amount)})` : `✅ Within 4 allowed paid leaves`}
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🎁</div>
+                        <div class="stat-value">${formatCurrency(summary.bonuses_this_month)}</div>
+                        <div class="stat-label">Bonuses This Month</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">${bonuses.length} bonus rewards on record</div>
+                    </div>
+                    <div class="stat-card" style="border-color:rgba(99,102,241,0.3)">
+                        <div class="stat-icon">💵</div>
+                        <div class="stat-value text-primary-color">${formatCurrency(summary.net_estimated_payout)}</div>
+                        <div class="stat-label">Estimated Payout (${currentMonth})</div>
+                        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">Salary - Leaves + Bonuses</div>
+                    </div>
+                </div>
+
+                <!-- 6-Month Commitment & Agreement Details -->
+                <div class="card" style="margin-bottom:20px;border-left:4px solid var(--primary)">
+                    <div class="chart-title" style="margin-bottom:10px">📜 Employment Agreement & Tenure Commitment</div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:14px">
+                        <div>
+                            <div style="font-size:0.78rem;color:var(--text-muted)">Joining Date</div>
+                            <div style="font-size:1rem;font-weight:600">${user.joining_date || 'Initial System Staff'}</div>
+                        </div>
+                        <div>
+                            <div style="font-size:0.78rem;color:var(--text-muted)">Minimum Commitment</div>
+                            <div style="font-size:1rem;font-weight:600">${commitment.required_months} Months (${commitment.months_served} months served)</div>
+                        </div>
+                        <div>
+                            <div style="font-size:0.78rem;color:var(--text-muted)">Tenure Commitment Status</div>
+                            <span class="badge ${commitment.is_satisfied ? 'badge-completed' : 'badge-assigned'}" style="font-size:0.85rem">
+                                ${commitment.is_satisfied ? '✅ Commitment Satisfied' : `⏳ In Progress (${commitment.months_remaining} months left)`}
+                            </span>
+                        </div>
+                    </div>
+                    <div style="padding:10px 14px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:0.82rem;line-height:1.4">
+                        <b>Tenure Rules Summary:</b><br/>
+                        • Staff must complete the 6-month minimum tenure. Resigning early requires a verified critical emergency reason.<br/>
+                        • Resignation notice must be served at least <b>30 days (1 month)</b> in advance.<br/>
+                        • The shop provides a <b>15-day notice</b> prior to any scheduled staff termination.
+                    </div>
+                </div>
+
+                <!-- Leave Application Form -->
+                <div class="card" style="margin-bottom:20px">
+                    <div class="chart-title" style="margin-bottom:6px">📝 Apply for Leave (2-Day Advance Notice Required)</div>
+                    <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px">
+                        Shop policy permits up to <b>4 paid leaves per calendar month</b>. Any additional leaves are transparently deducted at the daily rate of <b>${formatCurrency(summary.daily_rate)}</b>/day. Leaves must be submitted at least 2 calendar days ahead.
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight:600">Leave Date <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" id="leave-date" min="${minDateStr}" value="${minDateStr}" style="height:44px">
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px">Earliest eligible date: ${minDateStr} (2-day advance)</div>
+                        </div>
+                        <div class="form-group" style="max-width:140px">
+                            <label class="form-label" style="font-weight:600">Days</label>
+                            <input type="number" class="form-control" id="leave-days" min="1" max="15" value="1" style="height:44px">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight:600">Reason for Leave <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="leave-reason" rows="2" placeholder="Describe the reason for leave (e.g. Family function, health checkup)..."></textarea>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="submitLeaveRequest()">
+                        📤 Submit Leave Application
+                    </button>
+                </div>
+
+                <!-- My Leave History Table -->
+                <div class="card" style="margin-bottom:20px">
+                    <div class="chart-title" style="margin-bottom:12px">📋 My Leave History</div>
+                    ${leaves.length === 0 ? `
+                        <div class="text-muted" style="font-size:0.85rem">No leave requests submitted yet.</div>
+                    ` : `
+                        <div class="table-container">
+                            <table>
+                                <thead><tr><th>Leave Date</th><th>Days</th><th>Reason</th><th>Status</th><th>Submitted On</th><th>Admin Notes</th></tr></thead>
+                                <tbody>
+                                    ${leaves.map(l => `
+                                        <tr>
+                                            <td style="font-weight:600">${l.leave_date}</td>
+                                            <td>${l.days} day(s)</td>
+                                            <td>${l.reason}</td>
+                                            <td><span class="badge ${l.status === 'Approved' ? 'badge-completed' : l.status === 'Rejected' ? 'badge-cancelled' : 'badge-assigned'}">${l.status}</span></td>
+                                            <td style="font-size:0.78rem;color:var(--text-muted)">${formatDate(l.created_at)}</td>
+                                            <td style="font-size:0.8rem">${l.admin_notes || '—'}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `}
+                </div>
+
+                <!-- Performance & Festival Bonuses -->
+                <div class="card">
+                    <div class="chart-title" style="margin-bottom:12px">🎉 Bonuses & Rewards on Record</div>
+                    ${bonuses.length === 0 ? `
+                        <div class="text-muted" style="font-size:0.85rem">No bonuses awarded yet. Performance & festival bonuses granted by Admin will appear here.</div>
+                    ` : `
+                        <div class="table-container">
+                            <table>
+                                <thead><tr><th>Date</th><th>Bonus Type</th><th>Amount</th><th>Reason</th><th>Awarded By</th></tr></thead>
+                                <tbody>
+                                    ${bonuses.map(b => `
+                                        <tr>
+                                            <td style="font-size:0.8rem;color:var(--text-muted)">${formatDate(b.awarded_at)}</td>
+                                            <td><span class="badge badge-completed" style="font-size:0.78rem">${b.bonus_type}</span></td>
+                                            <td style="font-weight:700;color:var(--primary)">${formatCurrency(b.amount)}</td>
+                                            <td>${b.reason}</td>
+                                            <td>${b.awarded_by_name || 'Admin'}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function submitLeaveRequest() {
+    const leaveDate = document.getElementById('leave-date').value;
+    const days = parseInt(document.getElementById('leave-days').value || 1);
+    const reason = document.getElementById('leave-reason').value.trim();
+
+    if (!leaveDate) {
+        showToast('Please select a leave date.', 'warning');
+        return;
+    }
+    if (reason.length < 5) {
+        showToast('Please describe the reason for your leave (at least 5 characters).', 'warning');
+        return;
+    }
+
+    // Client-side 2-day check
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const targetDate = new Date(leaveDate + 'T00:00:00');
+    const diffDays = Math.round((targetDate - today) / (1000 * 60 * 60 * 24));
+    if (diffDays < 2) {
+        showToast('Shop policy requires at least 2 calendar days advance notice for leaves.', 'error');
+        return;
+    }
+
+    try {
+        const res = await api.post('/staff-mgmt/leave/apply', {
+            leave_date: leaveDate,
+            days: days,
+            reason: reason
+        });
+        showToast(res.message, 'success');
+        renderStaffLeavesAndSalary();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function openResignationModal(commitmentStatus) {
+    const minNoticeDate = new Date();
+    minNoticeDate.setDate(minNoticeDate.getDate() + 30);
+    const minNoticeDateStr = minNoticeDate.toISOString().split('T')[0];
+
+    const isUnderCommitment = (commitmentStatus !== 'Satisfied');
+
+    showModal(`
+        <div class="modal-header">
+            <span class="modal-title">📝 Submit Resignation Notice</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="padding:12px;background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);border-radius:var(--radius-sm);margin-bottom:14px;font-size:0.85rem">
+            <b>Notice Rules:</b><br/>
+            • <b>30-day minimum notice</b> is strictly required before departure.<br/>
+            ${isUnderCommitment ? '• <span class="text-danger"><b>Warning:</b> You have not yet completed the 6-month commitment. Resigning early requires a critical emergency justification.</span>' : '• 6-month commitment satisfied.'}
+        </div>
+        <div class="form-group">
+            <label class="form-label" style="font-weight:600">Proposed Last Working Day <span class="text-danger">*</span></label>
+            <input type="date" class="form-control" id="resignation-date" min="${minNoticeDateStr}" value="${minNoticeDateStr}" style="height:44px">
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px">Must be at least 30 days from today (${minNoticeDateStr}).</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label" style="font-weight:600">Reason for Resignation <span class="text-danger">*</span></label>
+            <textarea class="form-control" id="resignation-reason" rows="2" placeholder="Primary reason for leaving..."></textarea>
+        </div>
+        ${isUnderCommitment ? `
+            <div class="form-group">
+                <label class="form-label" style="font-weight:600;color:var(--danger)">Emergency Justification (Required for < 6 months tenure) <span class="text-danger">*</span></label>
+                <textarea class="form-control" id="resignation-emergency" rows="3" placeholder="Provide full details of the urgent/unavoidable personal reason..."></textarea>
+            </div>
+        ` : ''}
+        <div class="flex gap-2" style="margin-top:16px">
+            <button class="btn btn-outline flex-1" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            <button class="btn btn-primary flex-1" onclick="submitResignation(${isUnderCommitment})">Submit Notice</button>
+        </div>
+    `);
+}
+
+async function submitResignation(isUnderCommitment) {
+    const lastDate = document.getElementById('resignation-date').value;
+    const reason = document.getElementById('resignation-reason').value.trim();
+    const emergency = document.getElementById('resignation-emergency')?.value.trim() || null;
+
+    if (!lastDate) {
+        showToast('Please select your proposed last working day.', 'warning');
+        return;
+    }
+    if (reason.length < 5) {
+        showToast('Please state your reason for resignation.', 'warning');
+        return;
+    }
+    if (isUnderCommitment && (!emergency || emergency.length < 10)) {
+        showToast('Emergency justification of at least 10 characters is required for leaving before 6 months.', 'warning');
+        return;
+    }
+
+    try {
+        const res = await api.post('/staff-mgmt/resignation', {
+            proposed_last_date: lastDate,
+            reason: reason,
+            emergency_justification: emergency
+        });
+        showToast(res.message, 'success');
+        document.querySelector('.modal-overlay')?.remove();
+        renderStaffLeavesAndSalary();
     } catch (e) {
         showToast(e.message, 'error');
     }

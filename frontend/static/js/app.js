@@ -15,6 +15,7 @@ router.register('/track/*', renderRepairTracker);
 router.register('/customer', renderCustomerDashboard);
 router.register('/customer/submit', renderSubmitRepair);
 router.register('/customer/invoices', renderCustomerInvoices);
+router.register('/customer/support', renderCustomerSupport);
 
 // Admin routes
 router.register('/admin', renderAdminDashboard);
@@ -23,12 +24,16 @@ router.register('/admin/inventory', renderAdminInventory);
 router.register('/admin/reports', renderAdminReports);
 router.register('/admin/staff', renderAdminStaff);
 router.register('/admin/bills', renderAdminBills);
+router.register('/admin/offers', renderAdminOffers);
+router.register('/admin/support', renderAdminSupportTickets);
+router.register('/admin/payments', renderAdminPaymentsReport);
 router.register('/admin/feedback', renderAdminFeedback);
 router.register('/admin/warranties', renderAdminWarranties);
 router.register('/admin/audit-logs', renderAdminAuditLogs);
 
 // Staff routes
 router.register('/staff', renderStaffDashboard);
+router.register('/staff/leaves', renderStaffLeavesAndSalary);
 router.register('/staff/inventory', renderStaffInventory);
 
 // Shop routes

@@ -71,6 +71,14 @@ class AssignTechnicianRequest(BaseModel):
     technician_id: int
     note: Optional[str] = None
 
+class RejectRepairRequest(BaseModel):
+    reason: str  # Required part unavailable | Location/area issue | Staff unavailable | Workload issue | Incorrect device/problem | Other
+    notes: Optional[str] = None
+
+class ReassignTechnicianRequest(BaseModel):
+    new_technician_id: int
+    reason: Optional[str] = None
+
 class AddPartRequest(BaseModel):
     part_id: int
     quantity: int = 1
@@ -509,6 +517,222 @@ def assign_technician(job_id: int, req: AssignTechnicianRequest, current_user: d
 
     return {"message": f"Technician {tech['name']} assigned successfully!", "status": new_status}
 
+VALID_REJECTION_REASONS = {
+    "Required part unavailable",
+    "Location/area issue",
+    "Staff unavailable",
+    "Workload issue",
+    "Incorrect device/problem",
+    "Other"
+}
+
+@router.post("/{job_id}/reject")
+def reject_assigned_repair(job_id: int, req: RejectRepairRequest, current_user: dict = Depends(get_current_user)):
+    """
+    Staff member rejects their assigned repair request with mandatory valid reason.
+    Only assigned staff can reject their own repair.
+    """
+    if current_user["role"] != "staff":
+        raise HTTPException(403, "Only assigned staff members can reject repairs.")
+
+    conn = get_db()
+    job = conn.execute("SELECT * FROM repair_jobs WHERE id=?", (job_id,)).fetchone()
+    if not job:
+        conn.close()
+        raise HTTPException(404, "Repair job not found.")
+
+    if job["technician_id"] != current_user["id"]:
+        conn.close()
+        raise HTTPException(403, "You can only reject repairs assigned directly to you.")
+
+    if job["status"] in ("Completed", "Delivered", "Cancelled", "Rejected"):
+        conn.close()
+        raise HTTPException(400, f"Cannot reject repair with status '{job['status']}'.")
+
+    # Validate mandatory reason
+    cleaned_reason = req.reason.strip() if req.reason else ""
+    if not cleaned_reason or cleaned_reason not in VALID_REJECTION_REASONS:
+        conn.close()
+        raise HTTPException(400, f"Please select a valid rejection reason. Allowed: {sorted(list(VALID_REJECTION_REASONS))}")
+
+    if cleaned_reason == "Other":
+        if not req.notes or len(req.notes.strip()) < 5:
+            conn.close()
+            raise HTTPException(400, "When selecting 'Other', a detailed explanation (at least 5 characters) is mandatory.")
+
+    notes_text = req.notes.strip() if req.notes else ""
+    from_status = job["status"]
+
+    conn.execute("""
+        UPDATE repair_jobs
+        SET status='Rejected', rejection_reason=?, rejection_notes=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (cleaned_reason, notes_text, job_id))
+
+    # Log in repair_status_history
+    history_note = f"Rejected by technician {current_user['name']}. Reason: {cleaned_reason}" + (f" ({notes_text})" if notes_text else "")
+    conn.execute("""
+        INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+        VALUES (?, ?, 'Rejected', ?, ?)
+    """, (job_id, from_status, current_user["id"], history_note))
+
+    # Notify all admins in-app
+    admins = conn.execute("SELECT id FROM users WHERE role='admin'").fetchall()
+    for a in admins:
+        conn.execute("""
+            INSERT INTO notifications (user_id, repair_job_id, title, message)
+            VALUES (?, ?, '⚠️ Repair Rejected by Staff', ?)
+        """, (a["id"], job_id, f"Technician {current_user['name']} rejected repair {job['repair_id']}. Reason: {cleaned_reason}."))
+
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        user=current_user,
+        action="TECHNICIAN_REJECTED_JOB",
+        entity="repair_jobs",
+        entity_id=job_id,
+        details={"repair_id": job["repair_id"], "reason": cleaned_reason, "notes": notes_text}
+    )
+
+    return {"message": "Repair rejected successfully. Admin has been notified for reassignment.", "status": "Rejected"}
+
+@router.post("/{job_id}/reassign")
+def reassign_repair(job_id: int, req: ReassignTechnicianRequest, current_user: dict = Depends(require_role("admin"))):
+    """
+    Admin reassigns a repair job (rejected or active) to another available staff member.
+    Maintains full assignment history.
+    """
+    conn = get_db()
+    job = conn.execute("""
+        SELECT rj.*, u.name as old_tech_name
+        FROM repair_jobs rj
+        LEFT JOIN users u ON rj.technician_id=u.id
+        WHERE rj.id=?
+    """, (job_id,)).fetchone()
+
+    if not job:
+        conn.close()
+        raise HTTPException(404, "Repair job not found.")
+
+    new_tech = conn.execute("SELECT id, name, role, is_active FROM users WHERE id=?", (req.new_technician_id,)).fetchone()
+    if not new_tech or new_tech["role"] not in ("staff", "admin") or new_tech["is_active"] == 0:
+        conn.close()
+        raise HTTPException(400, "Selected user is not an active staff technician.")
+
+    if job["technician_id"] == req.new_technician_id:
+        conn.close()
+        raise HTTPException(400, f"Technician {new_tech['name']} is already assigned to this repair.")
+
+    old_tech_name = job["old_tech_name"] or "None"
+    from_status = job["status"]
+    new_status = "Assigned"
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conn.execute("""
+        UPDATE repair_jobs
+        SET technician_id=?, assigned_at=?, assigned_by=?, status=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (req.new_technician_id, now_str, current_user["id"], new_status, job_id))
+
+    history_note = f"Reassigned from {old_tech_name} to {new_tech['name']} by Admin." + (f" Reason: {req.reason}" if req.reason else "")
+    conn.execute("""
+        INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+        VALUES (?, ?, ?, ?, ?)
+    """, (job_id, from_status, new_status, current_user["id"], history_note))
+
+    # Notify new technician
+    conn.execute("""
+        INSERT INTO notifications (user_id, repair_job_id, title, message)
+        VALUES (?, ?, 'New Repair Reassigned to You', ?)
+    """, (req.new_technician_id, job_id, f"Repair {job['repair_id']} has been reassigned to you by admin."))
+
+    # Notify customer
+    conn.execute("""
+        INSERT INTO notifications (user_id, repair_job_id, title, message)
+        VALUES (?, ?, 'Technician Assigned', ?)
+    """, (job["customer_id"], job_id, f"Your repair {job['repair_id']} has been assigned to technician {new_tech['name']}."))
+
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        user=current_user,
+        action="REPAIR_REASSIGNED",
+        entity="repair_jobs",
+        entity_id=job_id,
+        details={
+            "repair_id": job["repair_id"],
+            "old_technician": old_tech_name,
+            "new_technician": new_tech["name"],
+            "new_technician_id": req.new_technician_id,
+            "reason": req.reason
+        }
+    )
+
+    return {
+        "message": f"Repair reassigned to {new_tech['name']} successfully!",
+        "repair_id": job["repair_id"],
+        "status": new_status,
+        "technician_name": new_tech["name"]
+    }
+
+@router.post("/{job_id}/accept")
+def accept_assigned_repair(job_id: int, current_user: dict = Depends(get_current_user)):
+    """
+    Staff accepts an assigned repair request, transitioning it to Diagnosing.
+    """
+    if current_user["role"] != "staff":
+        raise HTTPException(403, "Only staff can accept assigned repairs.")
+
+    conn = get_db()
+    job = conn.execute("SELECT * FROM repair_jobs WHERE id=?", (job_id,)).fetchone()
+    if not job:
+        conn.close()
+        raise HTTPException(404, "Repair job not found.")
+
+    if job["technician_id"] != current_user["id"]:
+        conn.close()
+        raise HTTPException(403, "You can only accept repairs assigned directly to you.")
+
+    if job["status"] not in ("Assigned", "Requested", "Received"):
+        conn.close()
+        return {"message": f"Repair is already in '{job['status']}' state.", "status": job["status"]}
+
+    from_status = job["status"]
+    new_status = "Diagnosing"
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conn.execute("""
+        UPDATE repair_jobs
+        SET status=?, accepted_at=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (new_status, now_str, job_id))
+
+    conn.execute("""
+        INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+        VALUES (?, ?, ?, ?, ?)
+    """, (job_id, from_status, new_status, current_user["id"], f"Accepted by technician {current_user['name']}. Diagnosis started."))
+
+    # Notify customer
+    conn.execute("""
+        INSERT INTO notifications (user_id, repair_job_id, title, message)
+        VALUES (?, ?, 'Diagnosis Started', ?)
+    """, (job["customer_id"], job_id, f"Technician {current_user['name']} has accepted your repair {job['repair_id']} and started diagnosis."))
+
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        user=current_user,
+        action="REPAIR_ACCEPTED",
+        entity="repair_jobs",
+        entity_id=job_id,
+        details={"repair_id": job["repair_id"], "status": new_status}
+    )
+
+    return {"message": "Repair accepted! Diagnosis started.", "status": new_status}
+
 # ----------------------------------------------------
 # 8. Technician Workload Stats
 # ----------------------------------------------------
@@ -689,6 +913,10 @@ def add_part_atomic(job_id: int, req: AddPartRequest, current_user: dict = Depen
         job = conn.execute("SELECT * FROM repair_jobs WHERE id=?", (job_id,)).fetchone()
         if not job:
             raise HTTPException(404, "Repair job not found")
+
+        # Staff can only add parts to their assigned repair
+        if current_user["role"] == "staff" and job["technician_id"] != current_user["id"]:
+            raise HTTPException(403, "You can only add parts to repairs assigned directly to you.")
 
         part = conn.execute("SELECT * FROM inventory WHERE id=?", (req.part_id,)).fetchone()
         if not part:

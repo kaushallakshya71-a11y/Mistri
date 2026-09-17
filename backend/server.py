@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from db.database import init_db, get_db
-from routes import auth, repairs, inventory, bills, ai, reports, notifications, feedback, shop, warranties
+from routes import auth, repairs, inventory, bills, ai, reports, notifications, feedback, shop, warranties, staff_mgmt, support
 from utils.qrcode_gen import generate_qr_base64
 
 @asynccontextmanager
@@ -70,6 +70,8 @@ app.include_router(notifications.router)
 app.include_router(feedback.router)
 app.include_router(shop.router)
 app.include_router(warranties.router)
+app.include_router(staff_mgmt.router)
+app.include_router(support.router)
 
 # Serve uploaded images
 uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")

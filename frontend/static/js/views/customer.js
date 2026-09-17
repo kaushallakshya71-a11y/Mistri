@@ -774,7 +774,10 @@ async function handleSubmitRepair(e) {
 async function renderCustomerInvoices() {
     showLoading();
     try {
-        const bills = await api.get('/bills/');
+        const [bills, activeOffers] = await Promise.all([
+            api.get('/bills/'),
+            api.get('/bills/offers/active').catch(() => [])
+        ]);
         setContent(`
             <div class="page">
                 <div class="page-header">
@@ -786,6 +789,31 @@ async function renderCustomerInvoices() {
                         ${langToggleBtn()}
                     </div>
                 </div>
+
+                <!-- Active Festival & Special Offers Banner -->
+                ${activeOffers && activeOffers.length > 0 ? `
+                    <div class="card" style="margin-bottom:20px;background:linear-gradient(135deg,rgba(255,183,77,0.15),rgba(255,112,67,0.12));border:1px solid #f59e0b;padding:16px;border-radius:12px">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                            <span style="font-size:1.5rem">🎁</span>
+                            <div>
+                                <strong style="font-size:1rem;color:#f59e0b">Special & Festival Offers Active!</strong>
+                                <div style="font-size:0.8rem;color:var(--text-muted)">Use these discount coupon codes during billing or payment checkout.</div>
+                            </div>
+                        </div>
+                        <div style="display:flex;flex-wrap:wrap;gap:10px">
+                            ${activeOffers.map(o => `
+                                <div style="background:var(--surface);padding:8px 14px;border-radius:8px;border:1px dashed #f59e0b;display:flex;align-items:center;gap:10px">
+                                    <div>
+                                        <div style="font-weight:700;letter-spacing:1px;color:#f59e0b">${o.code}</div>
+                                        <div style="font-size:0.75rem;color:var(--text-muted)">${o.title} (${o.discount_type === 'percentage' ? o.discount_value + '% OFF' : '₹' + o.discount_value + ' OFF'}${o.min_bill_amount ? ', Min ₹' + o.min_bill_amount : ''})</div>
+                                    </div>
+                                    <button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${o.code}');showToast('Copied ${o.code} to clipboard!','success')" style="padding:2px 8px;font-size:0.75rem">📋 Copy</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+
                 ${bills.length === 0 ? `
                     <div class="empty-state card">
                         <div class="empty-state-icon">📄</div>
@@ -800,19 +828,29 @@ async function renderCustomerInvoices() {
                             <tbody>
                                 ${bills.map(b => `
                                     <tr>
-                                        <td class="font-mono">${b.bill_number}</td>
+                                        <td class="font-mono">
+                                            ${b.bill_number}
+                                            ${b.applied_coupon ? `<div style="font-size:0.7rem;color:#f59e0b">🎟️ ${b.applied_coupon} (-₹${b.discount_amount})</div>` : ''}
+                                        </td>
                                         <td class="font-mono text-primary-color">${b.repair_id}</td>
                                         <td>${b.brand} ${b.model}</td>
                                         <td><strong>${formatCurrency(b.total_amount)}</strong></td>
                                         <td>${statusBadge(b.payment_status)}</td>
                                         <td style="font-size:0.8rem;color:var(--text-muted)">${formatDate(b.created_at)}</td>
                                         <td>
-                                            <div class="flex gap-2 items-center">
+                                            <div class="flex gap-2 items-center flex-wrap">
                                                 <button onclick="api.download('/bills/${b.id}/pdf', 'Invoice-${b.bill_number}.pdf')" class="btn btn-outline btn-sm">⬇ PDF</button>
-                                                ${b.payment_status !== 'Paid' ? `
+                                                ${b.payment_status === 'Unpaid' || b.payment_status === 'Failed' ? `
+                                                    ${!b.applied_coupon ? `
+                                                        <button onclick="openApplyCouponModal(${b.id}, '${b.bill_number}', ${b.total_amount})" class="btn btn-outline btn-sm" style="border-color:#f59e0b;color:#f59e0b">
+                                                            🎟️ Coupon
+                                                        </button>
+                                                    ` : ''}
                                                     <button onclick="openCustomerUpiPaymentModal(${b.id}, '${b.bill_number}', ${b.total_amount})" class="btn btn-primary btn-sm" style="background:#16a34a;border-color:#16a34a">
                                                         💳 Pay UPI
                                                     </button>
+                                                ` : b.payment_status === 'Pending' ? `
+                                                    <span class="badge badge-warning" style="font-size:0.75rem">⏳ Verification Pending</span>
                                                 ` : '<span class="badge badge-success" style="font-size:0.75rem">Paid ✅</span>'}
                                             </div>
                                         </td>
@@ -827,6 +865,46 @@ async function renderCustomerInvoices() {
     } catch (e) {
         showToast(e.message, 'error');
     }
+}
+
+/** Open Apply Coupon Modal */
+function openApplyCouponModal(billId, billNumber, currentAmount) {
+    const overlay = showModal(`
+        <div class="modal-header">
+            <span class="modal-title">🎟️ Apply Discount / Festival Coupon</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="padding:10px 0">
+            <div style="font-size:0.9rem;color:var(--text-muted);margin-bottom:8px">Invoice #${billNumber} | Current: <b>${formatCurrency(currentAmount)}</b></div>
+            <div class="form-group" style="margin-bottom:12px">
+                <label class="form-label">Enter Coupon Code</label>
+                <input type="text" class="form-control" id="coupon-code-input" placeholder="e.g. FESTIVE10, WELCOME50" style="text-transform:uppercase;font-weight:700">
+            </div>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px">
+                Discounts apply instantly on taxable parts/services and recalculate total bill with GST.
+            </p>
+            <div class="flex justify-end gap-2">
+                <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+                <button class="btn btn-primary" id="apply-coupon-submit-btn" style="background:#f59e0b;border-color:#f59e0b">Apply Coupon</button>
+            </div>
+        </div>
+    `);
+
+    overlay.querySelector('#apply-coupon-submit-btn').onclick = async () => {
+        const code = (overlay.querySelector('#coupon-code-input')?.value || '').trim();
+        if (!code) {
+            showToast('Please enter a coupon code', 'warning');
+            return;
+        }
+        try {
+            const res = await api.post(`/bills/${billId}/apply-offer`, { coupon_code: code });
+            showToast(`Coupon applied! New Total: ${formatCurrency(res.new_total)} 🎉`, 'success');
+            overlay.remove();
+            renderCustomerInvoices();
+        } catch (err) {
+            showToast(err.message || 'Failed to apply coupon', 'error');
+        }
+    };
 }
 
 /** QR Code Modal */
@@ -877,11 +955,11 @@ async function openCustomerUpiPaymentModal(billId, billNumber, amount) {
 
             <div style="text-align:left">
                 <div class="form-group" style="margin-bottom:12px">
-                    <label class="form-label" style="font-size:0.8rem">UPI Reference / UTR Number (Optional)</label>
-                    <input type="text" class="form-control" id="upi-payment-ref" placeholder="e.g. 423987123456">
+                    <label class="form-label" style="font-size:0.8rem">UPI Reference / UTR Number (Mandatory for verification)</label>
+                    <input type="text" class="form-control" id="upi-payment-ref" placeholder="e.g. 423987123456" required>
                 </div>
                 <button class="btn btn-primary w-full" id="confirm-pay-btn" style="background:#16a34a;border-color:#16a34a;padding:10px">
-                    ✅ I Have Paid — Confirm Payment
+                    ✅ I Have Paid — Submit for Verification
                 </button>
             </div>
         </div>
@@ -908,23 +986,276 @@ async function openCustomerUpiPaymentModal(billId, billNumber, amount) {
         const confirmBtn = overlay.querySelector('#confirm-pay-btn');
         confirmBtn.onclick = async () => {
             const utr = (overlay.querySelector('#upi-payment-ref')?.value || '').trim();
+            if (!utr) {
+                showToast('Kripaya payment ke baad UTR / Transaction Reference Number enter karein', 'warning');
+                return;
+            }
             confirmBtn.disabled = true;
-            confirmBtn.innerText = 'Verifying... ⏳';
+            confirmBtn.innerText = 'Submitting... ⏳';
             try {
-                await api.post(`/bills/${billId}/pay-online`, {
+                const res = await api.post(`/bills/${billId}/pay-online`, {
                     payment_method: 'UPI',
-                    transaction_id: utr || `UPI-TXN-${Date.now()}`
+                    transaction_id: utr
                 });
-                showToast('Payment successful! Warranty activated & repair marked completed! 🎉', 'success');
+                showToast(res.message || 'Payment submitted! Admin verification pending.', 'info');
                 overlay.remove();
                 renderCustomerInvoices();
             } catch (err) {
                 confirmBtn.disabled = false;
-                confirmBtn.innerText = '✅ I Have Paid — Confirm Payment';
-                showToast(err.message || 'Payment confirmation failed', 'error');
+                confirmBtn.innerText = '✅ I Have Paid — Submit for Verification';
+                showToast(err.message || 'Payment submission failed', 'error');
             }
         };
     } catch (e) {
         showToast('Failed to load UPI QR: ' + e.message, 'error');
     }
 }
+
+/** ----------------------------------------------------
+ * Customer Help & Support Tickets
+ * ---------------------------------------------------- */
+async function renderCustomerSupport() {
+    showLoading();
+    try {
+        const [tickets, repairs] = await Promise.all([
+            api.get('/support/tickets'),
+            api.get('/repairs/').catch(() => [])
+        ]);
+
+        setContent(`
+            <div class="page">
+                <div class="page-header">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+                        <div>
+                            <div class="page-title">🎧 Help & Support Desk</div>
+                            <div class="page-subtitle">Track help tickets or reach shop admin for repair / billing inquiries</div>
+                        </div>
+                        <div style="display:flex;gap:8px">
+                            ${langToggleBtn()}
+                            <button class="btn btn-primary" onclick="openNewCustomerTicketModal()">➕ Raise Ticket</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-grid" style="margin-bottom:24px">
+                    <div class="stat-card">
+                        <div class="stat-icon">📩</div>
+                        <div class="stat-value">${tickets.length}</div>
+                        <div class="stat-label">Total Tickets</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⏳</div>
+                        <div class="stat-value">${tickets.filter(t => t.status === 'Open' || t.status === 'In Progress').length}</div>
+                        <div class="stat-label">Active Tickets</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-value">${tickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length}</div>
+                        <div class="stat-label">Resolved</div>
+                    </div>
+                </div>
+
+                ${tickets.length === 0 ? `
+                    <div class="empty-state card">
+                        <div class="empty-state-icon">🎧</div>
+                        <div class="empty-state-title">No support tickets yet</div>
+                        <div class="text-muted" style="margin-bottom:16px">Need help with a repair, bill, warranty, or delivery? Create your first ticket!</div>
+                        <button class="btn btn-primary" onclick="openNewCustomerTicketModal()">➕ Raise New Ticket</button>
+                    </div>
+                ` : `
+                    <div class="dashboard-grid">
+                        ${tickets.map(t => `
+                            <div class="card cursor-pointer" onclick="openCustomerTicketDetailModal(${t.id})" style="border-left:4px solid ${t.status === 'Resolved' ? 'var(--success)' : t.status === 'Closed' ? 'var(--text-muted)' : '#3b82f6'}">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="font-mono text-primary-color" style="font-weight:700">${t.ticket_number}</span>
+                                    ${statusBadge(t.status)}
+                                </div>
+                                <div style="font-weight:600;font-size:1.05rem;margin-bottom:6px">${t.subject}</div>
+                                <div style="font-size:0.8rem;color:var(--text-muted);display:flex;gap:12px;flex-wrap:wrap">
+                                    <span>Category: <b>${t.category}</b></span>
+                                    <span>Priority: <b>${t.priority}</b></span>
+                                    ${t.repair_id ? `<span>Repair: <b>${t.repair_id}</b></span>` : ''}
+                                </div>
+                                <div style="margin-top:10px;font-size:0.75rem;color:var(--text-muted);display:flex;justify-content:space-between">
+                                    <span>Created: ${formatDate(t.created_at)}</span>
+                                    <span style="color:var(--primary);font-weight:600">Open Chat 💬</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        `);
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+/** Open Modal to Raise New Customer Ticket */
+async function openNewCustomerTicketModal() {
+    let repairs = [];
+    try {
+        repairs = await api.get('/repairs/');
+    } catch (e) { }
+
+    const overlay = showModal(`
+        <div class="modal-header">
+            <span class="modal-title">🎧 Raise New Support Ticket</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <form id="raise-ticket-form" style="padding:10px 0">
+            <div class="form-group" style="margin-bottom:12px">
+                <label class="form-label">Subject *</label>
+                <input type="text" class="form-control" id="ticket-subject" placeholder="e.g. Query regarding Fan Repair completion date" required minlength="5">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+                <div class="form-group">
+                    <label class="form-label">Category</label>
+                    <select class="form-control" id="ticket-category">
+                        <option value="General">General Inquiry</option>
+                        <option value="Repair Status">Repair Status</option>
+                        <option value="Billing">Billing / Payment</option>
+                        <option value="Warranty">Warranty Claim</option>
+                        <option value="Delivery">Pickup / Delivery</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Priority</label>
+                    <select class="form-control" id="ticket-priority">
+                        <option value="Normal">Normal</option>
+                        <option value="High">High</option>
+                        <option value="Urgent">Urgent</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+                <label class="form-label">Related Repair Job (Optional)</label>
+                <select class="form-control" id="ticket-repair-id">
+                    <option value="">-- None / General Question --</option>
+                    ${repairs.map(r => `<option value="${r.id}">${r.repair_id} - ${r.brand} ${r.model} (${r.status})</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:16px">
+                <label class="form-label">Describe your issue / question in detail *</label>
+                <textarea class="form-control" id="ticket-msg" rows="4" placeholder="Kripaya apni samasya detail mein batayein..." required minlength="10"></textarea>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="ticket-submit-btn">Submit Ticket</button>
+            </div>
+        </form>
+    `);
+
+    overlay.querySelector('#raise-ticket-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const subject = overlay.querySelector('#ticket-subject').value.trim();
+        const category = overlay.querySelector('#ticket-category').value;
+        const priority = overlay.querySelector('#ticket-priority').value;
+        const repVal = overlay.querySelector('#ticket-repair-id').value;
+        const message = overlay.querySelector('#ticket-msg').value.trim();
+        const submitBtn = overlay.querySelector('#ticket-submit-btn');
+
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Creating... ⏳';
+
+        try {
+            await api.post('/support/tickets', {
+                subject,
+                category,
+                priority,
+                repair_id: repVal ? parseInt(repVal) : null,
+                message
+            });
+            showToast('Support ticket raised successfully! Support team will respond shortly.', 'success');
+            overlay.remove();
+            renderCustomerSupport();
+        } catch (err) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = 'Submit Ticket';
+            showToast(err.message || 'Failed to raise ticket', 'error');
+        }
+    };
+}
+
+/** Open Ticket Chat Thread Modal for Customer */
+async function openCustomerTicketDetailModal(ticketId) {
+    const overlay = showModal(`
+        <div class="modal-header">
+            <span class="modal-title">💬 Support Conversation</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div id="cust-ticket-content" style="padding:10px 0;min-height:260px;display:flex;justify-content:center;align-items:center">
+            <div class="spinner"></div>
+        </div>
+    `);
+
+    async function loadData() {
+        try {
+            const data = await api.get(`/support/tickets/${ticketId}`);
+            const t = data.ticket;
+            const messages = data.messages || [];
+
+            overlay.querySelector('#cust-ticket-content').innerHTML = `
+                <div style="width:100%">
+                    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:12px">
+                        <div>
+                            <strong style="font-size:1.1rem">${t.ticket_number}: ${t.subject}</strong>
+                            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">
+                                Category: <b>${t.category}</b> | Priority: <b>${t.priority}</b> ${t.repair_id ? '| Repair: ' + t.repair_id : ''}
+                            </div>
+                        </div>
+                        ${statusBadge(t.status)}
+                    </div>
+
+                    <!-- Message Thread Box -->
+                    <div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:8px 4px;margin-bottom:16px;background:var(--surface-2);border-radius:8px">
+                        ${messages.length === 0 ? '<div class="text-muted" style="text-align:center;padding:16px">No messages yet.</div>' : messages.map(m => `
+                            <div style="display:flex;flex-direction:column;align-self:${m.sender_role === 'customer' ? 'flex-end' : 'flex-start'};max-width:85%">
+                                <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:2px;align-self:${m.sender_role === 'customer' ? 'flex-end' : 'flex-start'}">
+                                    <b>${m.sender_name}</b> (${m.sender_role}) • ${formatDate(m.created_at)}
+                                </div>
+                                <div style="background:${m.sender_role === 'customer' ? 'var(--primary)' : 'var(--surface)'};color:${m.sender_role === 'customer' ? '#fff' : 'var(--text)'};padding:10px 14px;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);white-space:pre-wrap;font-size:0.9rem">
+                                    ${m.message}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    ${t.status === 'Closed' ? `
+                        <div class="badge badge-secondary w-full" style="text-align:center;padding:8px">This ticket is closed.</div>
+                    ` : `
+                        <form id="cust-ticket-reply-form" style="display:flex;gap:8px">
+                            <input type="text" class="form-control" id="cust-reply-msg" placeholder="Type your reply here..." required style="flex:1">
+                            <button type="submit" class="btn btn-primary" id="cust-reply-btn">Reply 💬</button>
+                        </form>
+                    `}
+                </div>
+            `;
+
+            const replyForm = overlay.querySelector('#cust-ticket-reply-form');
+            if (replyForm) {
+                replyForm.onsubmit = async (e) => {
+                    e.preventDefault();
+                    const input = overlay.querySelector('#cust-reply-msg');
+                    const msg = input.value.trim();
+                    if (!msg) return;
+                    const rBtn = overlay.querySelector('#cust-reply-btn');
+                    rBtn.disabled = true;
+                    try {
+                        await api.post(`/support/tickets/${ticketId}/reply`, { message: msg });
+                        input.value = '';
+                        await loadData();
+                    } catch (err) {
+                        showToast(err.message || 'Failed to send reply', 'error');
+                        rBtn.disabled = false;
+                    }
+                };
+            }
+        } catch (e) {
+            overlay.querySelector('#cust-ticket-content').innerHTML = `<div class="text-danger">${e.message}</div>`;
+        }
+    }
+
+    loadData();
+}
+

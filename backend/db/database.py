@@ -344,7 +344,103 @@ def init_db():
         )
     """)
 
-    # 17. Database Indexes for High Query Performance
+    # 17. Staff Leaves Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS staff_leaves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            staff_id INTEGER NOT NULL,
+            leave_date DATE NOT NULL,
+            days INTEGER NOT NULL DEFAULT 1,
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Pending',  -- Pending | Approved | Rejected | Cancelled
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            reviewed_by INTEGER,
+            reviewed_at DATETIME,
+            admin_notes TEXT,
+            FOREIGN KEY (staff_id) REFERENCES users(id),
+            FOREIGN KEY (reviewed_by) REFERENCES users(id)
+        )
+    """)
+
+    # 18. Salary Audit Logs Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS salary_audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            staff_id INTEGER NOT NULL,
+            old_salary REAL,
+            new_salary REAL,
+            changed_by INTEGER NOT NULL,
+            notes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (staff_id) REFERENCES users(id),
+            FOREIGN KEY (changed_by) REFERENCES users(id)
+        )
+    """)
+
+    # 19. Support Tickets Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS support_tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id TEXT UNIQUE NOT NULL,  -- e.g. SUP-2026-1025
+            customer_id INTEGER NOT NULL,
+            repair_job_id INTEGER,
+            category TEXT NOT NULL,  -- Repair Issue | Payment Issue | Repair Status | Staff Issue | Invoice Issue | Account Issue | General Query
+            subject TEXT NOT NULL,
+            message TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Open',  -- Open | In Progress | Resolved | Closed
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (customer_id) REFERENCES users(id),
+            FOREIGN KEY (repair_job_id) REFERENCES repair_jobs(id)
+        )
+    """)
+
+    # 20. Support Ticket Messages Table (Conversation Thread)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS support_ticket_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            sender_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE,
+            FOREIGN KEY (sender_id) REFERENCES users(id)
+        )
+    """)
+
+    # 21. Customer Special & Festival Offers Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS customer_offers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE NOT NULL,  -- e.g. DIWALI20, FESTIVE100
+            title TEXT NOT NULL,
+            description TEXT,
+            discount_type TEXT NOT NULL DEFAULT 'percentage',  -- percentage | flat
+            discount_value REAL NOT NULL,
+            min_bill_amount REAL DEFAULT 0,
+            max_discount REAL,
+            valid_until DATE,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 22. Staff Bonuses Table (Performance & Festival Bonuses)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS staff_bonuses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            staff_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            bonus_type TEXT NOT NULL,  -- Performance Bonus | Festival Bonus | Special Incentive
+            reason TEXT NOT NULL,
+            awarded_by INTEGER NOT NULL,
+            awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (staff_id) REFERENCES users(id),
+            FOREIGN KEY (awarded_by) REFERENCES users(id)
+        )
+    """)
+
+    # 23. Database Indexes for High Query Performance
     indexes = [
         "CREATE INDEX IF NOT EXISTS idx_repairs_id ON repair_jobs(repair_id)",
         "CREATE INDEX IF NOT EXISTS idx_repairs_customer ON repair_jobs(customer_id)",
@@ -359,6 +455,10 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_warranties_job ON warranties(repair_job_id)",
         "CREATE INDEX IF NOT EXISTS idx_repairs_batch ON repair_jobs(repair_batch_id)",
         "CREATE INDEX IF NOT EXISTS idx_users_google ON users(google_id)",
+        "CREATE INDEX IF NOT EXISTS idx_leaves_staff ON staff_leaves(staff_id)",
+        "CREATE INDEX IF NOT EXISTS idx_tickets_customer ON support_tickets(customer_id)",
+        "CREATE INDEX IF NOT EXISTS idx_tickets_status ON support_tickets(status)",
+        "CREATE INDEX IF NOT EXISTS idx_bonuses_staff ON staff_bonuses(staff_id)",
     ]
     for idx_sql in indexes:
         try:
@@ -366,7 +466,7 @@ def init_db():
         except Exception:
             pass
 
-    # 18. Auto-migration for existing databases: add any missing columns safely
+    # 24. Auto-migration for existing databases: add any missing columns safely
     alter_queries = [
         "ALTER TABLE users ADD COLUMN shop_id INTEGER DEFAULT 1",
         "ALTER TABLE repair_jobs ADD COLUMN shop_id INTEGER DEFAULT 1",
@@ -386,12 +486,46 @@ def init_db():
         "ALTER TABLE repair_jobs ADD COLUMN video_path TEXT",
         "ALTER TABLE repair_jobs ADD COLUMN landmark TEXT",
         "ALTER TABLE repair_jobs ADD COLUMN pincode TEXT",
+        # Staff salary & employment commitment columns
+        "ALTER TABLE users ADD COLUMN monthly_salary REAL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN joining_date DATE",
+        "ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN salary_policy_days INTEGER DEFAULT 30",
+        "ALTER TABLE users ADD COLUMN minimum_commitment_months INTEGER DEFAULT 6",
+        "ALTER TABLE users ADD COLUMN resignation_status TEXT DEFAULT 'None'",
+        "ALTER TABLE users ADD COLUMN resignation_notice_date DATE",
+        "ALTER TABLE users ADD COLUMN resignation_last_date DATE",
+        "ALTER TABLE users ADD COLUMN resignation_reason TEXT",
+        "ALTER TABLE users ADD COLUMN termination_notice_date DATE",
+        "ALTER TABLE users ADD COLUMN termination_effective_date DATE",
+        # Repair rejection & acceptance columns
+        "ALTER TABLE repair_jobs ADD COLUMN rejection_reason TEXT",
+        "ALTER TABLE repair_jobs ADD COLUMN rejection_notes TEXT",
+        "ALTER TABLE repair_jobs ADD COLUMN accepted_at DATETIME",
+        # Payment collection & verification columns
+        "ALTER TABLE payments ADD COLUMN collected_by INTEGER REFERENCES users(id)",
+        "ALTER TABLE payments ADD COLUMN verified_by INTEGER REFERENCES users(id)",
+        "ALTER TABLE payments ADD COLUMN verified_at DATETIME",
+        "ALTER TABLE payments ADD COLUMN notes TEXT",
+        # Bills offer discount columns
+        "ALTER TABLE bills ADD COLUMN offer_code TEXT",
+        "ALTER TABLE bills ADD COLUMN offer_discount REAL DEFAULT 0",
+        "ALTER TABLE customer_offers ADD COLUMN target_customer_id INTEGER REFERENCES users(id)",
+        "ALTER TABLE customer_offers ADD COLUMN valid_from DATE",
     ]
     for q in alter_queries:
         try:
             cursor.execute(q)
         except sqlite3.OperationalError:
             pass  # Column already exists
+
+    # Default joining_date for existing staff
+    try:
+        cursor.execute("UPDATE users SET joining_date=DATE(created_at) WHERE role='staff' AND joining_date IS NULL")
+        cursor.execute("UPDATE users SET monthly_salary=20000 WHERE email='raju@mistri.com' AND (monthly_salary IS NULL OR monthly_salary=0)")
+        cursor.execute("UPDATE users SET monthly_salary=22000 WHERE email='priya@mistri.com' AND (monthly_salary IS NULL OR monthly_salary=0)")
+    except Exception:
+        pass
 
     # Migrate any legacy 'Received' status to 'Requested'
     try:
@@ -406,6 +540,18 @@ def init_db():
             SELECT name, 'arun@gmail.com', phone, password_hash, role, auth_provider
             FROM users WHERE email = 'arun@example.com'
         """)
+    except Exception:
+        pass
+    # Seed initial festival offers
+    try:
+        offer_count = cursor.execute("SELECT COUNT(*) FROM customer_offers").fetchone()[0]
+        if offer_count == 0:
+            cursor.execute("""
+                INSERT INTO customer_offers (code, title, description, discount_type, discount_value, min_bill_amount, valid_until, is_active)
+                VALUES 
+                ('FESTIVE10', 'Festival Special 10% OFF', 'Flat 10% discount on all repair bills for festival celebration!', 'percentage', 10, 200, DATE('now', '+60 days'), 1),
+                ('WELCOME50', 'New Customer Flat ₹50 OFF', 'Flat ₹50 instant discount on your first appliance repair.', 'flat', 50, 300, DATE('now', '+90 days'), 1)
+            """)
     except Exception:
         pass
 

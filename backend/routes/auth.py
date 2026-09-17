@@ -7,14 +7,18 @@ from pydantic import BaseModel
 from typing import Optional
 import bcrypt as _bcrypt
 from jose import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from db.database import get_db
 from middleware.auth import SECRET_KEY, ALGORITHM, get_current_user
-import re
+from utils.audit import log_audit_event
 import os
-import httpx
+import re
 import json
 import urllib.parse
+try:
+    import httpx
+except ImportError:
+    httpx = None
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,6 +99,25 @@ class UserUpdate(BaseModel):
     name: str
     email: str
     phone: Optional[str] = None
+    monthly_salary: Optional[float] = None
+    is_active: Optional[int] = None
+
+class StaffCreateRequest(BaseModel):
+    name: str
+    email: str
+    phone: Optional[str] = None
+    password: str
+    monthly_salary: Optional[float] = 20000.0
+    joining_date: Optional[str] = None
+    minimum_commitment_months: Optional[int] = 6
+
+class StaffDeactivateRequest(BaseModel):
+    replacement_staff_id: Optional[int] = None
+    reason: Optional[str] = None
+    force: bool = False  # If True, bypasses 15-day notice with mandatory reason
+
+class StaffTerminationNoticeRequest(BaseModel):
+    reason: str
 
 # ---------------------------------------------------------------------------
 # Token
@@ -165,6 +188,10 @@ def login(req: LoginRequest):
     if not user:
         raise HTTPException(401, "Email address not found. Please register or check your email.")
 
+    # Check if deactivated
+    if user["is_active"] == 0:
+        raise HTTPException(403, "Your account has been deactivated. Please contact the administrator.")
+
     # Google-only accounts cannot login with password
     if user["auth_provider"] == "google" and not user["password_hash"]:
         raise HTTPException(401, "This account was created with Google Sign-In. Please use 'Continue with Google' to login.")
@@ -199,9 +226,18 @@ def list_users(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != "admin":
         raise HTTPException(403, "Admins only.")
     conn = get_db()
-    users = conn.execute(
-        "SELECT id, name, email, phone, role, auth_provider, created_at FROM users"
-    ).fetchall()
+    users = conn.execute("""
+        SELECT id, name, email, phone, role, auth_provider, created_at,
+               COALESCE(monthly_salary, 0) as monthly_salary,
+               joining_date,
+               COALESCE(is_active, 1) as is_active,
+               COALESCE(minimum_commitment_months, 6) as minimum_commitment_months,
+               COALESCE(resignation_status, 'None') as resignation_status,
+               resignation_notice_date, resignation_last_date, resignation_reason,
+               termination_notice_date, termination_effective_date
+        FROM users
+        ORDER BY id DESC
+    """).fetchall()
     conn.close()
     return [dict(u) for u in users]
 
@@ -210,25 +246,173 @@ def list_users(current_user: dict = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 @router.post("/staff")
-def create_staff(req: RegisterRequest, current_user: dict = Depends(get_current_user)):
+def create_staff(req: StaffCreateRequest, current_user: dict = Depends(get_current_user)):
     if current_user["role"] != "admin":
         raise HTTPException(403, "Admins only.")
-    # Staff email not restricted to Gmail
     validate_password_strength(req.password)
     conn = get_db()
     existing = conn.execute("SELECT id FROM users WHERE email = ?", (req.email.strip().lower(),)).fetchone()
     if existing:
         conn.close()
         raise HTTPException(400, "Email already registered.")
+    
     hashed = _hash_pw(req.password)
-    cursor = conn.execute(
-        "INSERT INTO users (name, email, phone, password_hash, role, auth_provider) VALUES (?,?,?,?,?,?)",
-        (req.name.strip(), req.email.strip().lower(), req.phone, hashed, "staff", "email")
-    )
+    join_dt = req.joining_date or date.today().isoformat()
+    min_months = req.minimum_commitment_months if req.minimum_commitment_months is not None else 6
+
+    cursor = conn.execute("""
+        INSERT INTO users (name, email, phone, password_hash, role, auth_provider,
+                           monthly_salary, joining_date, is_active, minimum_commitment_months)
+        VALUES (?, ?, ?, ?, 'staff', 'email', ?, ?, 1, ?)
+    """, (req.name.strip(), req.email.strip().lower(), req.phone, hashed,
+          req.monthly_salary or 0.0, join_dt, min_months))
     conn.commit()
     user_id = cursor.lastrowid
     conn.close()
-    return {"message": "Staff created", "user_id": user_id}
+
+    log_audit_event(
+        current_user,
+        action="STAFF_CREATED",
+        entity="users",
+        entity_id=user_id,
+        details={
+            "name": req.name.strip(),
+            "email": req.email.strip().lower(),
+            "monthly_salary": req.monthly_salary,
+            "joining_date": join_dt,
+            "minimum_commitment_months": min_months
+        }
+    )
+    return {"message": "Staff created successfully", "user_id": user_id}
+
+# ---------------------------------------------------------------------------
+# Admin: Deactivate Staff (With Active Repairs Reassignment & 15-Day Notice Check)
+# ---------------------------------------------------------------------------
+
+@router.put("/staff/{staff_id}/deactivate")
+def deactivate_staff(staff_id: int, req: StaffDeactivateRequest, current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin":
+        raise HTTPException(403, "Admins only.")
+
+    conn = get_db()
+    staff = conn.execute("SELECT * FROM users WHERE id=? AND role='staff'", (staff_id,)).fetchone()
+    if not staff:
+        conn.close()
+        raise HTTPException(404, "Staff member not found.")
+
+    # 1. Check active repairs
+    active_repairs = conn.execute("""
+        SELECT id, repair_id FROM repair_jobs
+        WHERE technician_id=? AND status NOT IN ('Completed', 'Delivered', 'Cancelled', 'Rejected')
+    """, (staff_id,)).fetchall()
+
+    if active_repairs and not req.replacement_staff_id:
+        conn.close()
+        repair_codes = ", ".join([r["repair_id"] for r in active_repairs])
+        raise HTTPException(
+            400,
+            f"This staff member has {len(active_repairs)} active assigned repair(s) ({repair_codes}). "
+            "Please select a replacement technician to reassign active repairs before deactivation."
+        )
+
+    # If replacement staff provided, verify and reassign
+    if req.replacement_staff_id:
+        repl_staff = conn.execute(
+            "SELECT id, name, is_active FROM users WHERE id=? AND role='staff'",
+            (req.replacement_staff_id,)
+        ).fetchone()
+        if not repl_staff or repl_staff["is_active"] == 0:
+            conn.close()
+            raise HTTPException(400, "Replacement technician must be an active staff member.")
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for r in active_repairs:
+            conn.execute("""
+                UPDATE repair_jobs SET technician_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?
+            """, (req.replacement_staff_id, r["id"]))
+            conn.execute("""
+                INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+                VALUES (?, (SELECT status FROM repair_jobs WHERE id=?), (SELECT status FROM repair_jobs WHERE id=?), ?, ?)
+            """, (r["id"], r["id"], current_user["id"],
+                  f"Reassigned from {staff['name']} to {repl_staff['name']} due to staff deactivation."))
+            conn.execute("""
+                INSERT INTO notifications (user_id, repair_job_id, title, message)
+                VALUES (?, ?, 'Repair Reassigned to You', ?)
+            """, (req.replacement_staff_id, r["id"], f"Repair {r['repair_id']} reassigned to you from {staff['name']}."))
+
+    # 2. Check 15-Day Termination Notice rule
+    if not req.force:
+        notice_dt = staff["termination_notice_date"]
+        if not notice_dt:
+            conn.close()
+            raise HTTPException(
+                400,
+                "15-day termination notice has not been issued to this staff member. "
+                "Please issue a 15-day notice first, or select 'Immediate Deactivation' with a mandatory critical reason."
+            )
+        try:
+            n_date = datetime.strptime(str(notice_dt)[:10], "%Y-%m-%d").date()
+            diff_days = (date.today() - n_date).days
+            if diff_days < 15:
+                rem = 15 - diff_days
+                conn.close()
+                raise HTTPException(
+                    400,
+                    f"Termination notice period is still active ({rem} day(s) remaining until the 15-day period completes). "
+                    "To force immediate exit, select 'Immediate Deactivation' with critical reason."
+                )
+        except ValueError:
+            pass
+    else:
+        if not req.reason or len(req.reason.strip()) < 10:
+            conn.close()
+            raise HTTPException(400, "For immediate deactivation without 15-day notice, a clear critical reason (min 10 chars) is mandatory.")
+
+    # 3. Mark inactive
+    conn.execute("UPDATE users SET is_active=0 WHERE id=?", (staff_id,))
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        current_user,
+        action="STAFF_DEACTIVATED",
+        entity="users",
+        entity_id=staff_id,
+        details={
+            "staff_name": staff["name"],
+            "reason": req.reason or "15-day notice completed",
+            "forced": req.force,
+            "reassigned_count": len(active_repairs),
+            "replacement_staff_id": req.replacement_staff_id
+        }
+    )
+
+    return {
+        "message": f"Staff member {staff['name']} deactivated successfully.",
+        "reassigned_repairs": len(active_repairs)
+    }
+
+# ---------------------------------------------------------------------------
+# Admin: Activate Staff
+# ---------------------------------------------------------------------------
+
+@router.put("/staff/{staff_id}/activate")
+def activate_staff(staff_id: int, current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "admin":
+        raise HTTPException(403, "Admins only.")
+    conn = get_db()
+    staff = conn.execute("SELECT * FROM users WHERE id=? AND role='staff'", (staff_id,)).fetchone()
+    if not staff:
+        conn.close()
+        raise HTTPException(404, "Staff member not found.")
+    conn.execute("""
+        UPDATE users SET is_active=1, termination_notice_date=NULL, termination_effective_date=NULL WHERE id=?
+    """, (staff_id,))
+    conn.commit()
+    conn.close()
+
+    log_audit_event(current_user, "STAFF_ACTIVATED", "users", staff_id, {"name": staff["name"]})
+    return {"message": f"Staff member {staff['name']} reactivated successfully."}
 
 # ---------------------------------------------------------------------------
 # Admin: Update User
@@ -245,10 +429,26 @@ def update_user(user_id: int, req: UserUpdate, current_user: dict = Depends(get_
     if conflict:
         conn.close()
         raise HTTPException(400, "Email already in use by another user.")
-    conn.execute(
-        "UPDATE users SET name=?, email=?, phone=? WHERE id=?",
-        (req.name.strip(), req.email.strip().lower(), req.phone, user_id)
-    )
+    
+    old_user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not old_user:
+        conn.close()
+        raise HTTPException(404, "User not found.")
+
+    # Check if salary changed
+    if req.monthly_salary is not None and old_user["monthly_salary"] != req.monthly_salary:
+        conn.execute("""
+            INSERT INTO salary_audit_logs (staff_id, old_salary, new_salary, changed_by, notes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (user_id, old_user["monthly_salary"] or 0, req.monthly_salary, current_user["id"], "Salary updated via user edit"))
+
+    conn.execute("""
+        UPDATE users
+        SET name=?, email=?, phone=?,
+            monthly_salary=COALESCE(?, monthly_salary),
+            is_active=COALESCE(?, is_active)
+        WHERE id=?
+    """, (req.name.strip(), req.email.strip().lower(), req.phone, req.monthly_salary, req.is_active, user_id))
     conn.commit()
     conn.close()
     return {"message": "User updated successfully."}
@@ -291,6 +491,9 @@ async def google_oauth_callback(code: str, state: Optional[str] = None, error: O
 
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise HTTPException(503, "Google Sign-In is not configured on the server.")
+
+    if not httpx:
+        raise HTTPException(503, "httpx is not installed for Google OAuth token exchange.")
 
     # Exchange code for tokens
     async with httpx.AsyncClient() as client:
