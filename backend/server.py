@@ -126,17 +126,26 @@ frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fronten
 if os.path.exists(frontend_dir):
     app.mount("/static", StaticFiles(directory=os.path.join(frontend_dir, "static")), name="static")
 
+    NO_CACHE_HEADERS = {
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
+
     @app.get("/", response_class=FileResponse)
     async def serve_root():
-        return FileResponse(os.path.join(frontend_dir, "index.html"))
+        return FileResponse(os.path.join(frontend_dir, "index.html"), headers=NO_CACHE_HEADERS)
 
     @app.get("/{full_path:path}", response_class=FileResponse)
     async def serve_frontend(full_path: str):
         file_path = os.path.join(frontend_dir, full_path)
         if os.path.isfile(file_path):
+            # If requesting index.html or JS files, don't cache
+            if full_path.endswith('.html') or full_path.endswith('.js'):
+                return FileResponse(file_path, headers=NO_CACHE_HEADERS)
             return FileResponse(file_path)
         # SPA fallback
-        return FileResponse(os.path.join(frontend_dir, "index.html"))
+        return FileResponse(os.path.join(frontend_dir, "index.html"), headers=NO_CACHE_HEADERS)
 
 if __name__ == "__main__":
     import uvicorn

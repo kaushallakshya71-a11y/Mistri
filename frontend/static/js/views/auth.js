@@ -13,15 +13,15 @@ function renderLandingPage() {
     document.getElementById('navbar').style.display = 'none';
     setContent(`
         <div class="landing-hero">
-            <div class="hero-badge">⚡ AI-Powered Electrical Appliance Repair</div>
+            <div class="hero-badge">⚡ AI-Powered Electrical/Electronic Appliance Repair</div>
             <h1 class="hero-title">Fix It Faster with <span>Mistri</span></h1>
-            <p class="hero-desc">The complete management platform for electrical appliance repair shops. Track fan, cooler, mixer, motor, geyser & pump repairs — all in one smart dashboard.</p>
+            <p class="hero-desc">The complete management platform for electrical/electronic appliance repair shops. Track fan, cooler, mixer, motor, geyser & pump repairs — all in one smart dashboard.</p>
             <div class="hero-cta">
                 <button class="btn btn-primary" onclick="router.navigate('/register')" style="font-size:1rem;padding:14px 32px">🚀 Get Started Free</button>
                 <button class="btn btn-outline" onclick="router.navigate('/login')" style="font-size:1rem;padding:14px 32px">🔑 Login</button>
             </div>
             <div class="hero-img-row">
-                <img src="/static/img/appliances_hero.png" alt="Electrical Appliances" class="hero-img-appliances">
+                <img src="/static/img/appliances_hero.png" alt="Electrical/Electronic Appliances" class="hero-img-appliances">
                 <img src="/static/img/technician.png" alt="Expert Technician" class="hero-img-technician">
             </div>
             <div class="hero-features">
@@ -80,8 +80,8 @@ function renderLogin() {
                         <span class="auth-brand-icon">⚡</span>
                         <span class="auth-brand-name">Mistri</span>
                     </div>
-                    <img src="/static/img/appliances_hero.png" alt="Electrical Appliances" class="auth-hero-img">
-                    <div class="auth-tagline">Your <span>Electrical Repair</span><br>Business, Supercharged</div>
+                    <img src="/static/img/appliances_hero.png" alt="Electrical/Electronic Appliances" class="auth-hero-img">
+                    <div class="auth-tagline">Your <span>Electrical/Electronic Repair</span><br>Business, Supercharged</div>
                     <div class="auth-tagline-sub">Manage fan, cooler, mixer, motor & geyser repairs with AI-powered cost estimates and real-time tracking.</div>
                     <div class="auth-appliance-pills">
                         <span class="appliance-pill">🌀 Fan Repair</span>
@@ -486,7 +486,7 @@ function renderRegister() {
                     </div>
                     <img src="/static/img/technician.png" alt="Expert Technician" class="auth-hero-img" style="height:280px;object-fit:cover;object-position:top">
                     <div class="auth-tagline">Join <span>Thousands</span> of<br>Repair Shops</div>
-                    <div class="auth-tagline-sub">Create your free account and start managing electrical appliance repairs smarter today.</div>
+                    <div class="auth-tagline-sub">Create your free account and start managing electrical/electronic appliance repairs smarter today.</div>
                     <div class="auth-appliance-pills">
                         <span class="appliance-pill">✅ Free Forever</span>
                         <span class="appliance-pill">🤖 AI Estimates</span>
