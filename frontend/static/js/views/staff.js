@@ -545,25 +545,39 @@ async function submitCollectCash(billId) {
 async function renderStaffLeavesAndSalary() {
     showLoading();
     try {
-        const [summary, leavesRes, bonuses] = await Promise.all([
+        const [summaryRes, leavesRes, bonuses] = await Promise.all([
             api.get('/staff-mgmt/summary'),
-            api.get('/staff-mgmt/leaves'),
+            api.get('/staff-mgmt/leaves').catch(() => []),
             api.get('/staff-mgmt/bonuses/' + (api.getUser()?.user_id || api.getUser()?.id)).catch(() => [])
         ]);
 
-        const user = summary.staff;
-        const policy = summary.leave_policy;
-        const commitment = summary.commitment;
-        const currentMonth = summary.current_month;
+        // Handle both Array (when backend returns list) and Object
+        const staffData = Array.isArray(summaryRes) ? (summaryRes[0] || {}) : (summaryRes.staff || summaryRes);
+        const policy = summaryRes.leave_policy || {
+            allowed_leaves_per_month: staffData.allowed_leaves || 4,
+            approved_leaves_this_month: staffData.leaves_used || 0,
+            unpaid_leaves: staffData.unpaid_leaves || 0,
+            salary_deduction_amount: staffData.salary_deduction || 0
+        };
+        const currentMonth = summaryRes.current_month || new Date().toISOString().slice(0, 7);
+        const commitment = summaryRes.commitment || {
+            required_months: staffData.minimum_commitment_months || 6,
+            months_served: staffData.months_served || 0,
+            months_remaining: Math.max(0, (staffData.minimum_commitment_months || 6) - (staffData.months_served || 0)),
+            is_satisfied: !!staffData.commitment_completed,
+            status: staffData.commitment_completed ? 'Satisfied' : 'In Progress'
+        };
+
+        const monthlySalary = staffData.monthly_salary || 0;
+        const dailyRate = staffData.daily_rate || (monthlySalary ? Math.round(monthlySalary / 30) : 0);
+        const bonusesAmount = staffData.current_month_bonuses || (Array.isArray(bonuses) ? bonuses.reduce((s,b) => s + (b.amount||0), 0) : 0);
+        const netPayout = staffData.estimated_final_salary || Math.max(0, monthlySalary - (policy.salary_deduction_amount || 0) + bonusesAmount);
         const leaves = leavesRes || [];
 
         // Calculate minimum date for 2-day advance notice
         const minDate = new Date();
         minDate.setDate(minDate.getDate() + 2);
         const minDateStr = minDate.toISOString().split('T')[0];
-
-        // Format dates
-        const joinedDateFormatted = user.joining_date ? formatDate(user.joining_date) : 'N/A';
 
         setContent(`
             <div class="page" style="max-width:960px;margin:0 auto">
@@ -580,18 +594,18 @@ async function renderStaffLeavesAndSalary() {
                 </div>
 
                 <!-- Resignation or Termination Alert Banner -->
-                ${user.resignation_status && user.resignation_status !== 'None' ? `
+                ${staffData.resignation_status && staffData.resignation_status !== 'None' ? `
                     <div style="padding:12px 16px;background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);border-radius:var(--radius-sm);margin-bottom:18px">
-                        <div style="font-weight:700;color:#eab308">⚠️ Resignation In Progress (${user.resignation_status})</div>
-                        <div style="font-size:0.85rem;margin-top:2px">Notice Filed: <b>${user.resignation_notice_date || 'N/A'}</b> · Proposed Last Date: <b>${user.resignation_last_date || 'N/A'}</b></div>
-                        <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">Reason: ${user.resignation_reason || 'N/A'}</div>
+                        <div style="font-weight:700;color:#eab308">⚠️ Resignation In Progress (${staffData.resignation_status})</div>
+                        <div style="font-size:0.85rem;margin-top:2px">Notice Filed: <b>${staffData.resignation_notice_date || 'N/A'}</b> · Proposed Last Date: <b>${staffData.resignation_last_date || 'N/A'}</b></div>
+                        <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">Reason: ${staffData.resignation_reason || 'N/A'}</div>
                     </div>
                 ` : ''}
 
-                ${user.termination_effective_date ? `
+                ${staffData.termination_effective_date ? `
                     <div style="padding:12px 16px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-sm);margin-bottom:18px">
                         <div style="font-weight:700;color:var(--danger)">🚨 15-Day Exit / Termination Notice Issued</div>
-                        <div style="font-size:0.85rem;margin-top:2px">Notice Date: <b>${user.termination_notice_date}</b> · Effective Exit Date: <b>${user.termination_effective_date}</b></div>
+                        <div style="font-size:0.85rem;margin-top:2px">Notice Date: <b>${staffData.termination_notice_date}</b> · Effective Exit Date: <b>${staffData.termination_effective_date}</b></div>
                     </div>
                 ` : ''}
 
@@ -599,9 +613,9 @@ async function renderStaffLeavesAndSalary() {
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-icon">💰</div>
-                        <div class="stat-value">${formatCurrency(summary.monthly_salary)}</div>
+                        <div class="stat-value">${formatCurrency(monthlySalary)}</div>
                         <div class="stat-label">Monthly Fixed Salary</div>
-                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Daily Rate: <b>${formatCurrency(summary.daily_rate)}</b> / day</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Daily Rate: <b>${formatCurrency(dailyRate)}</b> / day</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">📅</div>
@@ -613,13 +627,13 @@ async function renderStaffLeavesAndSalary() {
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">🎁</div>
-                        <div class="stat-value">${formatCurrency(summary.bonuses_this_month)}</div>
+                        <div class="stat-value">${formatCurrency(bonusesAmount)}</div>
                         <div class="stat-label">Bonuses This Month</div>
-                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">${bonuses.length} bonus rewards on record</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">${Array.isArray(bonuses) ? bonuses.length : 0} bonus rewards on record</div>
                     </div>
                     <div class="stat-card" style="border-color:rgba(99,102,241,0.3)">
                         <div class="stat-icon">💵</div>
-                        <div class="stat-value text-primary-color">${formatCurrency(summary.net_estimated_payout)}</div>
+                        <div class="stat-value text-primary-color">${formatCurrency(netPayout)}</div>
                         <div class="stat-label">Estimated Payout (${currentMonth})</div>
                         <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">Salary - Leaves + Bonuses</div>
                     </div>
@@ -631,7 +645,7 @@ async function renderStaffLeavesAndSalary() {
                     <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:14px">
                         <div>
                             <div style="font-size:0.78rem;color:var(--text-muted)">Joining Date</div>
-                            <div style="font-size:1rem;font-weight:600">${user.joining_date || 'Initial System Staff'}</div>
+                            <div style="font-size:1rem;font-weight:600">${staffData.joining_date || 'Initial System Staff'}</div>
                         </div>
                         <div>
                             <div style="font-size:0.78rem;color:var(--text-muted)">Minimum Commitment</div>
@@ -656,7 +670,7 @@ async function renderStaffLeavesAndSalary() {
                 <div class="card" style="margin-bottom:20px">
                     <div class="chart-title" style="margin-bottom:6px">📝 Apply for Leave (2-Day Advance Notice Required)</div>
                     <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px">
-                        Shop policy permits up to <b>4 paid leaves per calendar month</b>. Any additional leaves are transparently deducted at the daily rate of <b>${formatCurrency(summary.daily_rate)}</b>/day. Leaves must be submitted at least 2 calendar days ahead.
+                        Shop policy permits up to <b>4 paid leaves per calendar month</b>. Any additional leaves are transparently deducted at the daily rate of <b>${formatCurrency(dailyRate)}</b>/day. Leaves must be submitted at least 2 calendar days ahead.
                     </div>
 
                     <div class="form-row">

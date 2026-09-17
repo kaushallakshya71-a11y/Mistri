@@ -149,11 +149,19 @@ function logout() {
     showToast('Logged out successfully', 'info');
 }
 
-/** Toggle user dropdown */
+function toggleUserDropdown(event) {
+    if (event) event.stopPropagation();
+    const dropdown = document.getElementById('user-dropdown');
+    if (dropdown) {
+        dropdown.classList.toggle('open');
+    }
+}
+
+/** Toggle user dropdown fallback */
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('user-avatar')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        document.getElementById('user-dropdown').classList.toggle('open');
+        document.getElementById('user-dropdown')?.classList.toggle('open');
     });
     document.addEventListener('click', () => {
         document.getElementById('user-dropdown')?.classList.remove('open');

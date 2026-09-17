@@ -42,8 +42,11 @@
                     🔔 <span class="notif-badge" id="notif-badge" style="display:none">0</span>
                 </button>
                 <button class="theme-btn" id="theme-btn" title="Toggle theme">🌙</button>
+                <button class="btn btn-outline btn-sm" id="nav-logout-btn" onclick="logout()" title="Logout" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;font-size:0.85rem;color:var(--text-muted);border-color:var(--border)">
+                    🚪 Logout
+                </button>
                 <div class="user-menu">
-                    <div class="user-avatar" id="user-avatar">A</div>
+                    <div class="user-avatar" id="user-avatar" onclick="toggleUserDropdown(event)">A</div>
                     <div class="user-dropdown" id="user-dropdown">
                         <div class="dropdown-name" id="dropdown-name"></div>
                         <div class="dropdown-role" id="dropdown-role"></div>
@@ -73,15 +76,15 @@
         <div id="toast-container"></div>
     </div>
 
-    <script src="/static/js/i18n.js?v=12"></script>
-    <script src="/static/js/api.js?v=12"></script>
-    <script src="/static/js/router.js?v=12"></script>
-    <script src="/static/js/views/auth.js?v=12"></script>
-    <script src="/static/js/views/customer.js?v=12"></script>
-    <script src="/static/js/views/admin.js?v=12"></script>
-    <script src="/static/js/views/staff.js?v=12"></script>
-    <script src="/static/js/views/shop.js?v=12"></script>
-    <script src="/static/js/app.js?v=12"></script>
+    <script src="/static/js/i18n.js?v=13"></script>
+    <script src="/static/js/api.js?v=13"></script>
+    <script src="/static/js/router.js?v=13"></script>
+    <script src="/static/js/views/auth.js?v=13"></script>
+    <script src="/static/js/views/customer.js?v=13"></script>
+    <script src="/static/js/views/admin.js?v=13"></script>
+    <script src="/static/js/views/staff.js?v=13"></script>
+    <script src="/static/js/views/shop.js?v=13"></script>
+    <script src="/static/js/app.js?v=13"></script>
     <script>
         // Inline safety fallback: guarantees loading screen removal regardless of network caching
         setTimeout(function() {
