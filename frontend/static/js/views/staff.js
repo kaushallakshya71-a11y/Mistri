@@ -25,17 +25,17 @@ async function renderStaffDashboard() {
                 </div>
 
                 <div class="stats-grid">
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-1">
                         <div class="stat-icon">🔧</div>
                         <div class="stat-value">${jobs.length}</div>
                         <div class="stat-label">Total Assigned</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-2">
                         <div class="stat-icon">⏳</div>
                         <div class="stat-value">${activeJobs.length}</div>
                         <div class="stat-label">Active Jobs</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-3">
                         <div class="stat-icon">✅</div>
                         <div class="stat-value">${completedJobs.length}</div>
                         <div class="stat-label">Completed</div>

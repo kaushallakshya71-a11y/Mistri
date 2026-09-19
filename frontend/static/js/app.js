@@ -16,11 +16,13 @@ router.register('/track/*', renderRepairTracker);
 router.register('/customer', renderCustomerDashboard);
 router.register('/customer/submit', renderSubmitRepair);
 router.register('/customer/invoices', renderCustomerInvoices);
+router.register('/customer/offers', renderCustomerOffers);
 router.register('/customer/support', renderCustomerSupport);
 
 // Admin routes
 router.register('/admin', renderAdminDashboard);
 router.register('/admin/repairs', renderAdminRepairs);
+router.register('/admin/customers', renderAdminCustomers);
 router.register('/admin/inventory', renderAdminInventory);
 router.register('/admin/reports', renderAdminReports);
 router.register('/admin/staff', renderAdminStaff);
@@ -55,6 +57,7 @@ themeBtn.addEventListener('click', () => {
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('mistri_theme', next);
     themeBtn.textContent = next === 'dark' ? '☀️' : '🌙';
+    window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme: next } }));
 });
 
 // Notification button

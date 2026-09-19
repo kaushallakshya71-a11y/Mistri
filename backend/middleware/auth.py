@@ -26,6 +26,10 @@ if env_file.exists():
 SECRET_KEY = os.getenv("MISTRI_SECRET", "mistri-super-secret-key-2024-change-in-prod")
 ALGORITHM = "HS256"
 
+if os.getenv("ENVIRONMENT") == "production" and SECRET_KEY == "mistri-super-secret-key-2024-change-in-prod":
+    import logging
+    logging.getLogger("mistri.security").critical("SECURITY ALERT: Default MISTRI_SECRET is in use in production environment! Please set MISTRI_SECRET in .env.")
+
 security = HTTPBearer(auto_error=False)
 
 async def get_current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
@@ -54,7 +58,12 @@ async def get_current_user(request: Request, credentials: Optional[HTTPAuthoriza
 
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
-    return dict(user)
+        
+    u_dict = dict(user)
+    if u_dict.get("is_active") == 0:
+        raise HTTPException(status_code=403, detail="Your account has been deactivated. Please contact administrator.")
+
+    return u_dict
 
 def require_role(*roles):
     """Factory function - creates dependency that restricts access to given roles."""

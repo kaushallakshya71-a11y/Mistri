@@ -29,22 +29,22 @@ async function renderCustomerDashboard() {
                 </div>
 
                 <div class="stats-grid">
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-1">
                         <div class="stat-icon">🔧</div>
                         <div class="stat-value">${jobs.length}</div>
                         <div class="stat-label">${t('totalRepairs')}</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-2">
                         <div class="stat-icon">⏳</div>
                         <div class="stat-value">${activeJobs.length}</div>
                         <div class="stat-label">${t('activeRepairs')}</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-3">
                         <div class="stat-icon">✅</div>
                         <div class="stat-value">${jobs.filter(j => j.status === 'Delivered').length}</div>
                         <div class="stat-label">${t('completed')}</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-4">
                         <div class="stat-icon">🔔</div>
                         <div class="stat-value">${notifs.filter(n => !n.is_read).length}</div>
                         <div class="stat-label">${t('unreadAlerts')}</div>
@@ -621,14 +621,19 @@ async function triggerDeviceAI(idx) {
 
         const resultEl = document.getElementById(`ai-result-${idx}`);
         if (!resultEl) return;
-        resultEl.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;display:inline-block;margin-right:8px"></div> ${t('estimating')}`;
+        resultEl.innerHTML = `
+            <div class="animate-fade-in" style="display:flex;align-items:center;gap:10px;padding:8px 0">
+                <div class="spinner" style="width:18px;height:18px;border-width:2px"></div>
+                <span style="font-size:0.85rem;color:var(--text-secondary)">🤖 Analyzing fault & calculating spare parts...</span>
+            </div>
+        `;
         try {
             const est = await api.post('/ai/estimate', { device_type: deviceType, problem_description: problem });
             const confColors = { High: '#22c55e', Medium: '#f59e0b', Low: '#ef4444' };
             const confColor = confColors[est.confidence_level] || '#6b7280';
 
             resultEl.innerHTML = `
-                <div class="ai-result">
+                <div class="ai-result animate-scale-in">
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px">
                         <div>
                             <div class="ai-cost-range">₹${est.estimated_cost_min.toLocaleString()} – ₹${est.estimated_cost_max.toLocaleString()}</div>
@@ -676,7 +681,7 @@ async function triggerDeviceAI(idx) {
             if (cardData) { cardData.aiEstimate = est.estimated_cost_min || 0; updateTotalCost(); }
             window._aiEstimate = est.estimated_cost_min; // legacy compat
         } catch (e) {
-            resultEl.innerHTML = `<div style="color:var(--text-muted);font-size:0.8rem">⚠️ Problem thodi zyada detail mein describe karein.</div>`;
+            resultEl.innerHTML = `<div class="animate-shake" style="color:var(--text-muted);font-size:0.8rem">⚠️ Problem thodi zyada detail mein describe karein.</div>`;
         }
     }, 700);
 }
@@ -897,18 +902,29 @@ function openApplyCouponModal(billId, billNumber, currentAmount) {
         </div>
     `);
 
-    overlay.querySelector('#apply-coupon-submit-btn').onclick = async () => {
-        const code = (overlay.querySelector('#coupon-code-input')?.value || '').trim();
+    const submitBtn = overlay.querySelector('#apply-coupon-submit-btn');
+    const inputEl = overlay.querySelector('#coupon-code-input');
+
+    submitBtn.onclick = async () => {
+        const code = (inputEl?.value || '').trim();
         if (!code) {
+            inputEl?.classList.add('animate-shake');
+            setTimeout(() => inputEl?.classList.remove('animate-shake'), 350);
             showToast('Please enter a coupon code', 'warning');
             return;
         }
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px"></div> Applying...';
         try {
             const res = await api.post(`/bills/${billId}/apply-offer`, { coupon_code: code });
             showToast(`Coupon applied! New Total: ${formatCurrency(res.new_total)} 🎉`, 'success');
-            overlay.remove();
+            closeModal(overlay);
             renderCustomerInvoices();
         } catch (err) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Apply Coupon';
+            inputEl?.classList.add('animate-shake');
+            setTimeout(() => inputEl?.classList.remove('animate-shake'), 350);
             showToast(err.message || 'Failed to apply coupon', 'error');
         }
     };
@@ -995,6 +1011,11 @@ async function openCustomerUpiPaymentModal(billId, billNumber, amount) {
             const utr = (overlay.querySelector('#upi-payment-ref')?.value || '').trim();
             if (!utr) {
                 showToast('Kripaya payment ke baad UTR / Transaction Reference Number enter karein', 'warning');
+                return;
+            }
+            const utrRegex = /^[A-Za-z0-9]{10,22}$/;
+            if (!utrRegex.test(utr) || new Set(utr.toLowerCase()).size <= 2) {
+                showToast('Kripaya valid 10-22 character alphanumeric UTR / Transaction reference daalein (e.g. 423987123456)', 'warning');
                 return;
             }
             confirmBtn.disabled = true;
@@ -1266,3 +1287,123 @@ async function openCustomerTicketDetailModal(ticketId) {
     loadData();
 }
 
+
+/** ─── CUSTOMER OFFERS & COUPONS ─────────────────────────── */
+async function renderCustomerOffers() {
+    showLoading();
+    try {
+        const offers = await api.get('/bills/offers').catch(() => []);
+        const today = new Date().toISOString().slice(0,10);
+        const activeOffers = offers.filter(o => {
+            if (o.is_active !== 1) return false;
+            if (o.valid_from && today < o.valid_from) return false;
+            if (o.valid_until && today > o.valid_until) return false;
+            return true;
+        });
+        
+        setContent(`
+            <div class="page">
+                <div class="page-header">
+                    <div class="page-title">🎁 Offers & Coupons</div>
+                    <div class="page-subtitle">Apply these coupons when paying your repair bill</div>
+                </div>
+                
+                ${activeOffers.length === 0 ? `
+                    <div class="empty-state card">
+                        <div class="empty-state-icon">🎁</div>
+                        <div class="empty-state-title">No Active Offers</div>
+                        <div class="text-muted">Check back soon for festival discounts and special offers!</div>
+                    </div>
+                ` : `
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+                        ${activeOffers.map(o => {
+                            const isPct = o.discount_type === 'percentage';
+                            const discLabel = isPct ? o.discount_value + '% OFF' : '₹' + o.discount_value + ' OFF';
+                            const expiryStr = o.valid_until ? 'Valid till: ' + new Date(o.valid_until).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : 'No Expiry';
+                            return `
+                                <div class="card" style="border:1px dashed var(--primary);position:relative;overflow:hidden">
+                                    <div style="position:absolute;top:0;right:0;background:var(--primary);color:white;padding:4px 12px;font-size:0.75rem;font-weight:700;border-bottom-left-radius:8px">${discLabel}</div>
+                                    <div style="margin-top:8px">
+                                        <div style="font-size:1.4rem;font-weight:800;color:var(--primary);font-family:monospace;letter-spacing:2px">${o.code}</div>
+                                        <div style="font-weight:600;margin:4px 0">${o.title}</div>
+                                        <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px">${o.description || ''}</div>
+                                        <div style="font-size:0.78rem;display:flex;flex-direction:column;gap:3px">
+                                            ${o.min_bill_amount > 0 ? `<span>Min Bill: <b>₹${o.min_bill_amount}</b></span>` : ''}
+                                            ${o.max_discount ? `<span>Max Discount: <b>₹${o.max_discount}</b></span>` : ''}
+                                            <span style="color:var(--text-muted)">${expiryStr}</span>
+                                        </div>
+                                        <button class="btn btn-outline btn-sm w-full" style="margin-top:12px;border-color:var(--primary);color:var(--primary)" onclick="copyToClipboard('${o.code}')">
+                                            📋 Copy Code
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `}
+                
+                <div class="card" style="margin-top:24px">
+                    <div style="font-weight:600;font-size:1rem;margin-bottom:12px">💡 How to Apply Coupon</div>
+                    <ol style="font-size:0.9rem;color:var(--text-muted);padding-left:20px;line-height:2">
+                        <li>Go to <b>Invoices</b> section when your repair is billed</li>
+                        <li>Enter coupon code in the <b>"Apply Coupon"</b> box</li>
+                        <li>Click <b>Apply</b> to see your discount</li>
+                        <li>Discount is verified and applied securely</li>
+                    </ol>
+                </div>
+            </div>
+        `);
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard?.writeText(text).then(() => {
+        showToast('Coupon code copied: ' + text, 'success');
+    }).catch(() => {
+        showToast('Code: ' + text, 'info');
+    });
+}
+
+async function applyCoupon(billId) {
+    const code = document.getElementById('coupon-' + billId)?.value.trim();
+    if (!code) { showToast('Please enter a coupon code', 'warning'); return; }
+    try {
+        const res = await api.post('/bills/apply-offer', { bill_id: billId, offer_code: code.toUpperCase() });
+        showToast(res.message, 'success');
+        renderCustomerInvoices();
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function removeCoupon(billId) {
+    try {
+        await api.delete('/bills/apply-offer/' + billId);
+        showToast('Coupon removed', 'info');
+        renderCustomerInvoices();
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+function openItemClaimModal(warrantyId, itemName) {
+    showModal(`
+        <div class="modal-header">
+            <span class="modal-title">🔧 Warranty Claim: ${itemName}</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="padding:10px;background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.2);border-radius:8px;margin-bottom:12px;font-size:0.85rem">
+            Describe the issue with <b>${itemName}</b>. Our team will review and respond within 24 hours.
+        </div>
+        <div class="form-group">
+            <label class="form-label">Issue Description <span class="text-danger">*</span></label>
+            <textarea class="form-control" id="ic-desc" rows="3" placeholder="Describe the problem clearly..."></textarea>
+        </div>
+        <button class="btn btn-primary w-full" onclick="submitItemClaim(${warrantyId})">Submit Claim</button>
+    `);
+}
+async function submitItemClaim(warrantyId) {
+    const desc = document.getElementById('ic-desc')?.value.trim();
+    if (!desc || desc.length < 10) { showToast('Please describe the issue (min 10 chars)', 'warning'); return; }
+    try {
+        const res = await api.post('/warranties/item-claim', { item_warranty_id: warrantyId, issue_description: desc });
+        showToast(res.message, 'success');
+        document.querySelector('.modal-overlay')?.remove();
+    } catch(e) { showToast(e.message, 'error'); }
+}

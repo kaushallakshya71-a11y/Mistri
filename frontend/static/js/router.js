@@ -226,14 +226,15 @@ async function markAllRead() {
 /** Toast notifications */
 function showToast(message, type = 'info', duration = 4000) {
     const container = document.getElementById('toast-container');
+    if (!container) return;
     const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.innerHTML = `<span>${icons[type]}</span><span>${message}</span>`;
+    toast.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${message}</span>`;
     container.appendChild(toast);
     setTimeout(() => {
-        toast.style.animation = 'slideInRight 0.3s ease reverse';
-        setTimeout(() => toast.remove(), 300);
+        toast.style.animation = 'slideOutRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards';
+        setTimeout(() => { if (toast.parentNode) toast.remove(); }, 250);
     }, duration);
 }
 
@@ -323,11 +324,31 @@ function getStatusIcon(status) {
     return icons[status] || '⚙️';
 }
 
+function closeModal(overlay) {
+    if (!overlay) return;
+    if (overlay.classList.contains('closing')) return;
+    overlay.classList.add('closing');
+    setTimeout(() => {
+        if (overlay && overlay.parentNode) overlay.remove();
+    }, 160);
+}
+window.closeModal = closeModal;
+
 function showModal(content) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `<div class="modal">${content}</div>`;
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeModal(overlay);
+    });
+    // Wire modal close buttons if present
+    const closeBtn = overlay.querySelector('.modal-close');
+    if (closeBtn) {
+        closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            closeModal(overlay);
+        };
+    }
     document.body.appendChild(overlay);
     return overlay;
 }
@@ -341,7 +362,7 @@ function renderTimeline(currentStatus, historyList = []) {
     return `
         <div class="timeline-container">
             ${isException ? `
-                <div style="padding:8px 12px;background:#FF4D4D22;border:1px solid #FF4D4D66;border-radius:var(--radius-sm);margin-bottom:14px;color:#FF4D4D;font-weight:600;display:flex;align-items:center;gap:8px">
+                <div style="padding:8px 12px;background:#FF4D4D22;border:1px solid #FF4D4D66;border-radius:var(--radius-sm);margin-bottom:14px;color:#FF4D4D;font-weight:600;display:flex;align-items:center;gap:8px" class="animate-shake">
                     ${getStatusIcon(normalizedStatus)} Status: ${normalizedStatus}
                 </div>
             ` : ''}
@@ -375,14 +396,20 @@ function renderTimeline(currentStatus, historyList = []) {
 }
 
 function setContent(html) {
-    document.getElementById('main-content').innerHTML = html;
+    const main = document.getElementById('main-content');
+    if (!main) return;
+    main.innerHTML = html;
+    const firstChild = main.firstElementChild;
+    if (firstChild && !firstChild.classList.contains('animate-page') && !firstChild.classList.contains('animate-fade-in')) {
+        firstChild.classList.add('animate-page');
+    }
 }
 
 function showLoading() {
     setContent(`<div style="display:flex;align-items:center;justify-content:center;height:60vh;">
-        <div style="text-align:center">
-            <div class="spinner" style="width:48px;height:48px;border-width:4px;margin:0 auto 16px"></div>
-            <div class="text-muted">Loading...</div>
+        <div style="text-align:center" class="animate-fade-in">
+            <div class="spinner" style="width:40px;height:40px;border-width:3px;margin:0 auto 16px"></div>
+            <div class="text-muted" style="font-size:0.88rem;font-weight:500">Loading...</div>
         </div>
     </div>`);
 }

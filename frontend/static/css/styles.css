@@ -36,6 +36,12 @@
     --radius-sm: 8px;
     --radius-lg: 20px;
     --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* Animation Design Tokens */
+    --anim-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+    --anim-normal: 250ms cubic-bezier(0.16, 1, 0.3, 1);
+    --anim-slow: 400ms cubic-bezier(0.16, 1, 0.3, 1);
+    --anim-spring: 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 [data-theme="light"] {
@@ -664,11 +670,16 @@ tr:hover td {
     font-size: 0.875rem;
     font-weight: 600;
     cursor: pointer;
-    transition: var(--transition);
+    transition: transform var(--anim-fast), box-shadow var(--anim-fast), background var(--anim-fast), border-color var(--anim-fast), color var(--anim-fast);
     border: none;
     text-decoration: none;
     white-space: nowrap;
     font-family: inherit;
+    user-select: none;
+}
+
+.btn:active:not(:disabled) {
+    transform: scale(0.97) !important;
 }
 
 .btn-primary {
@@ -767,13 +778,23 @@ tr:hover td {
     color: var(--text-primary);
     font-size: 0.9rem;
     font-family: inherit;
-    transition: var(--transition);
+    transition: border-color var(--anim-fast), box-shadow var(--anim-fast), background var(--anim-fast);
     outline: none;
 }
 
 .form-control:focus {
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-light);
+    background: var(--bg-hover);
+}
+
+.form-control.is-invalid {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+
+.field-error {
+    animation: fadeIn var(--anim-fast) forwards;
 }
 
 .form-control::placeholder {
@@ -1140,17 +1161,21 @@ select.form-control {
 .timeline-dot.active {
     border-color: var(--primary);
     background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-light);
+    animation: pulseSubtle 2s infinite ease-in-out;
 }
 
 .timeline-dot.done {
     border-color: var(--success);
     background: var(--success);
+    animation: checkmarkPop var(--anim-spring) forwards;
 }
 
 .timeline-label {
     font-size: 0.7rem;
     color: var(--text-muted);
     white-space: nowrap;
+    transition: color var(--anim-fast);
 }
 
 .timeline-label.active {
@@ -1226,7 +1251,7 @@ select.form-control {
     font-size: 0.72rem;
 }
 
-/* ---- QR Modal ---- */
+/* ---- QR & Action Modals ---- */
 .modal-overlay {
     position: fixed;
     inset: 0;
@@ -1236,7 +1261,11 @@ select.form-control {
     display: flex;
     align-items: center;
     justify-content: center;
-    animation: fadeIn 0.2s ease;
+    animation: modalOverlayEnter var(--anim-normal) forwards ease-out;
+}
+
+.modal-overlay.closing {
+    animation: modalOverlayExit var(--anim-fast) forwards ease-in;
 }
 
 .modal {
@@ -1244,9 +1273,14 @@ select.form-control {
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     padding: 32px;
-    max-width: 400px;
-    width: 90%;
-    animation: fadeInUp 0.3s ease;
+    max-width: 480px;
+    width: 92%;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    animation: modalBoxEnter var(--anim-normal) forwards cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-overlay.closing .modal {
+    animation: modalBoxExit var(--anim-fast) forwards cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modal-header {
@@ -1303,18 +1337,206 @@ select.form-control {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 20px;
+    padding: 24px;
+    backdrop-filter: blur(14px);
+    transition: transform var(--anim-normal), box-shadow var(--anim-normal), border-color var(--anim-normal);
+    position: relative;
+    overflow: hidden;
+}
+
+.chart-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 15%;
+    right: 15%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--primary), transparent);
+    opacity: 0.7;
+}
+
+.chart-card:hover {
+    border-color: var(--glass-border);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28), 0 0 24px rgba(249, 115, 22, 0.1);
+}
+
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .chart-title {
+    font-weight: 700;
+    font-size: 0.98rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    letter-spacing: -0.01em;
+}
+
+.chart-badge {
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    border-radius: 999px;
     font-weight: 600;
+    background: var(--primary-light);
+    color: var(--primary);
+    border: 1px solid rgba(249, 115, 22, 0.25);
+}
+
+.chart-kpi-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
     margin-bottom: 16px;
-    font-size: 0.95rem;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--border);
+}
+
+.chart-kpi-amount {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.85rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.chart-kpi-sub {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.kpi-trend-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.kpi-trend-pill.positive {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.chart-time-pills {
+    display: flex;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2px;
+    gap: 2px;
+}
+
+.chart-pill-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all var(--anim-fast);
+}
+
+.chart-pill-btn.active, .chart-pill-btn:hover {
+    background: var(--primary);
+    color: white;
+}
+
+.chart-split {
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    align-items: center;
+    gap: 20px;
+}
+
+@media (max-width: 680px) {
+    .chart-split {
+        grid-template-columns: 1fr;
+    }
+}
+
+.chart-breakdown-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.chart-breakdown-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.78rem;
+    padding: 4px 6px;
+    border-radius: 6px;
+    transition: background var(--anim-fast);
+}
+
+.chart-breakdown-row:hover {
+    background: var(--bg-hover);
+}
+
+.chart-breakdown-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chart-breakdown-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.chart-breakdown-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 6px currentColor;
+}
+
+.chart-breakdown-stats {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.chart-progress-track {
+    height: 5px;
+    width: 100%;
+    background: var(--bg-input);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.chart-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .chart-wrapper {
     position: relative;
-    height: 220px;
+    height: 240px;
+    width: 100%;
 }
 
 /* ---- Dashboard Grid ---- */
@@ -1506,26 +1728,42 @@ select.form-control {
     border-left: 3px solid var(--warning);
 }
 
-/* ---- Animations ---- */
+/* ---- Animations & Micro-Interactions System ---- */
 @keyframes fadeIn {
-    from {
-        opacity: 0;
-    }
-
-    to {
-        opacity: 1;
-    }
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 @keyframes fadeInUp {
     from {
         opacity: 0;
-        transform: translateY(20px);
+        transform: translateY(12px);
     }
-
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@keyframes pageEnter {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes cardScaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.97) translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
     }
 }
 
@@ -1534,16 +1772,166 @@ select.form-control {
         opacity: 0;
         transform: translateX(100%);
     }
-
     to {
         opacity: 1;
         transform: translateX(0);
     }
 }
 
+@keyframes slideOutRight {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+}
+
+@keyframes modalOverlayEnter {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes modalOverlayExit {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+@keyframes modalBoxEnter {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes modalBoxExit {
+    from {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: scale(0.96) translateY(8px);
+    }
+}
+
+@keyframes pulseSubtle {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(249, 115, 22, 0);
+    }
+}
+
+@keyframes checkmarkPop {
+    0% { transform: scale(0.6); }
+    70% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+}
+
+@keyframes shimmerSkeleton {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+@keyframes subtleShake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-4px); }
+    40%, 80% { transform: translateX(4px); }
+}
+
+@keyframes discountGlow {
+    0% { transform: scale(1); background: rgba(245, 158, 11, 0.25); }
+    50% { transform: scale(1.02); background: rgba(245, 158, 11, 0.45); }
+    100% { transform: scale(1); background: transparent; }
+}
+
 @keyframes spin {
     to {
         transform: rotate(360deg);
+    }
+}
+
+/* ---- Animation Utility Classes ---- */
+.animate-page {
+    animation: pageEnter var(--anim-normal) forwards cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-fade-in {
+    animation: fadeIn var(--anim-normal) forwards ease-out;
+}
+
+.animate-slide-up {
+    animation: pageEnter var(--anim-normal) forwards cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-scale-in {
+    animation: cardScaleIn var(--anim-normal) forwards cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-shake {
+    animation: subtleShake 0.35s ease;
+}
+
+.animate-discount-glow {
+    animation: discountGlow 0.8s ease;
+}
+
+/* Stagger Delays */
+.stagger-1 { animation-delay: 30ms !important; }
+.stagger-2 { animation-delay: 60ms !important; }
+.stagger-3 { animation-delay: 90ms !important; }
+.stagger-4 { animation-delay: 120ms !important; }
+.stagger-5 { animation-delay: 150ms !important; }
+.stagger-6 { animation-delay: 180ms !important; }
+
+/* ---- Skeleton Loaders ---- */
+.skeleton {
+    background: linear-gradient(90deg, var(--bg-input) 25%, var(--bg-hover) 50%, var(--bg-input) 75%);
+    background-size: 200% 100%;
+    animation: shimmerSkeleton 1.6s infinite ease-in-out;
+    border-radius: var(--radius-sm);
+}
+
+.skeleton-text {
+    height: 14px;
+    margin-bottom: 8px;
+    border-radius: 4px;
+}
+
+.skeleton-title {
+    height: 22px;
+    width: 60%;
+    margin-bottom: 12px;
+    border-radius: 6px;
+}
+
+.skeleton-card {
+    border-radius: var(--radius-lg);
+    height: 110px;
+    padding: 16px;
+}
+
+.skeleton-circle {
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
     }
 }
 

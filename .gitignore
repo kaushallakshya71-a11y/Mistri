@@ -23,10 +23,12 @@ venv/
 env/
 ENV/
 
-# Database files (do not commit live DB)
+# Database files (do not commit live DB or backups)
+*.db
 backend/db/mistri.db
 backend/db/*.db-shm
 backend/db/*.db-wal
+backend/backups/*.db
 
 # Environment secrets
 .env

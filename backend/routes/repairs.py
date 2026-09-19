@@ -50,8 +50,44 @@ STATUS_FLOW = [
 EXCEPTION_STATUSES = ["Cancelled", "On Hold", "Rejected"]
 ALL_VALID_STATUSES = set(STATUS_FLOW + EXCEPTION_STATUSES + ["Received"])  # Support legacy "Received"
 
+VALID_STATUS_TRANSITIONS = {
+    "Requested": {"Assigned", "Diagnosing", "Cancelled", "Rejected"},
+    "Received": {"Assigned", "Diagnosing", "Cancelled", "Rejected"},
+    "Assigned": {"Diagnosing", "On Hold", "Cancelled", "Rejected"},
+    "Diagnosing": {"Approved", "On Hold", "Cancelled", "Rejected"},
+    "Approved": {"Repairing", "On Hold", "Cancelled"},
+    "Repairing": {"Ready", "On Hold", "Cancelled"},
+    "Ready": {"Delivered", "Completed", "On Hold"},
+    "Delivered": {"Completed"},
+    "On Hold": {"Assigned", "Diagnosing", "Approved", "Repairing", "Ready", "Cancelled"},
+    "Cancelled": set(),
+    "Rejected": set(),
+    "Completed": set()
+}
+
 ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB limit
+
+def validate_file_magic_bytes(content: bytes, ext: str) -> bool:
+    """Validate file magic bytes to prevent spoofed/executable uploads disguised as images/videos."""
+    if not content or len(content) < 4:
+        return False
+    ext = ext.lower()
+    if ext in ("jpg", "jpeg"):
+        return content.startswith(b'\xff\xd8\xff')
+    if ext == "png":
+        return content.startswith(b'\x89PNG\r\n\x1a\n')
+    if ext == "webp":
+        return len(content) >= 12 and content.startswith(b'RIFF') and content[8:12] == b'WEBP'
+    if ext in ("mp4", "mov"):
+        return len(content) >= 12 and (b'ftyp' in content[:16] or b'moov' in content[:16] or b'wide' in content[:16] or b'mdat' in content[:16])
+    if ext in ("webm", "mkv"):
+        return content.startswith(b'\x1a\x45\xdf\xa3')
+    if ext == "avi":
+        return len(content) >= 12 and content.startswith(b'RIFF') and content[8:12] == b'AVI '
+    if ext == "3gp":
+        return len(content) >= 12 and b'ftyp' in content[:16]
+    return True
 
 def generate_repair_id(conn):
     year = datetime.now().year
@@ -145,6 +181,9 @@ async def submit_repair(
         if len(file_bytes) > MAX_FILE_SIZE:
             conn.close()
             raise HTTPException(400, "Image size exceeds maximum limit of 5MB.")
+        if not validate_file_magic_bytes(file_bytes, ext):
+            conn.close()
+            raise HTTPException(400, f"File content does not match image extension '{ext}' (spoofed or invalid file format).")
             
         safe_filename = f"{uuid.uuid4().hex}.{ext}"
         filepath = os.path.join(UPLOAD_DIR, safe_filename)
@@ -165,6 +204,9 @@ async def submit_repair(
         if len(file_bytes) > MAX_VIDEO_SIZE:
             conn.close()
             raise HTTPException(400, "Video size exceeds maximum limit of 50MB.")
+        if not validate_file_magic_bytes(file_bytes, ext):
+            conn.close()
+            raise HTTPException(400, f"File content does not match video extension '{ext}' (spoofed or invalid file format).")
             
         safe_filename = f"vid_{uuid.uuid4().hex}.{ext}"
         filepath = os.path.join(UPLOAD_DIR, safe_filename)
@@ -208,25 +250,31 @@ async def submit_repair(
     conn.commit()
     conn.close()
 
-    # Log audit event
-    log_audit_event(
-        user=current_user,
-        action="REPAIR_CREATED",
-        entity="repair_jobs",
-        entity_id=job_db_id,
-        details={"repair_id": repair_id, "device": f"{brand} {model}", "estimated_cost": estimated_cost}
-    )
+    # Log audit event safely
+    try:
+        log_audit_event(
+            user=current_user,
+            action="REPAIR_CREATED",
+            entity="repair_jobs",
+            entity_id=job_db_id,
+            details={"repair_id": repair_id, "device": f"{brand} {model}", "estimated_cost": estimated_cost}
+        )
+    except Exception as e:
+        pass
 
-    # Trigger Automated WhatsApp / SMS dispatch alert
-    dispatch_repair_status_alert(
-        customer_id=current_user["id"],
-        customer_name=current_user.get("name", "Valued Customer"),
-        customer_phone=current_user.get("phone"),
-        repair_id=repair_id,
-        device_name=f"{brand} {model}",
-        status="Requested",
-        total_amount=estimated_cost
-    )
+    # Trigger Automated WhatsApp / SMS dispatch alert safely
+    try:
+        dispatch_repair_status_alert(
+            customer_id=current_user["id"],
+            customer_name=current_user.get("name", "Valued Customer"),
+            customer_phone=current_user.get("phone"),
+            repair_id=repair_id,
+            device_name=f"{brand} {model}",
+            status="Requested",
+            total_amount=estimated_cost
+        )
+    except Exception as e:
+        pass
 
     return {
         "id": job_db_id,
@@ -828,6 +876,31 @@ def update_status(job_id: int, update: RepairStatusUpdate, current_user: dict = 
         raise HTTPException(403, "You can only update your assigned jobs.")
 
     from_status = job["status"]
+    if from_status == update.status:
+        conn.close()
+        return {"message": f"Job is already in {update.status} status", "status": update.status}
+
+    # State transition enforcement
+    allowed_next = VALID_STATUS_TRANSITIONS.get(from_status, set())
+    is_valid_flow = (update.status in allowed_next)
+
+    if not is_valid_flow:
+        if current_user["role"] == "staff":
+            conn.close()
+            raise HTTPException(400, f"Invalid status transition from '{from_status}' to '{update.status}'. Allowed next statuses: {sorted(list(allowed_next)) if allowed_next else 'None (Terminal state)'}.")
+        elif current_user["role"] == "admin":
+            override_reason = update.note or update.technician_notes
+            if not override_reason or len(override_reason.strip()) < 5:
+                conn.close()
+                raise HTTPException(400, f"Non-standard status transition from '{from_status}' to '{update.status}' requires an admin override note (minimum 5 characters).")
+            log_audit_event(
+                user=current_user,
+                action="ADMIN_STATUS_OVERRIDE",
+                entity="repair_jobs",
+                entity_id=job_id,
+                details={"from": from_status, "to": update.status, "reason": override_reason.strip()}
+            )
+
     completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if update.status in ("Completed", "Delivered") else job["completed_at"]
 
     conn.execute("""
@@ -922,14 +995,18 @@ def add_part_atomic(job_id: int, req: AddPartRequest, current_user: dict = Depen
         if not part:
             raise HTTPException(404, "Part not found in inventory.")
 
-        # Stock validation
-        if part["quantity"] < req.quantity:
-            raise HTTPException(400, f"Insufficient stock: only {part['quantity']} units of '{part['part_name']}' available.")
+        # 1. Decrement inventory atomically
+        cursor = conn.execute(
+            "UPDATE inventory SET quantity = quantity - ?, updated_at=CURRENT_TIMESTAMP WHERE id = ? AND quantity >= ?",
+            (req.quantity, req.part_id, req.quantity)
+        )
+        if cursor.rowcount == 0:
+            current = conn.execute("SELECT quantity FROM inventory WHERE id=?", (req.part_id,)).fetchone()
+            avail = current["quantity"] if current else 0
+            raise HTTPException(400, f"Insufficient stock: only {avail} units of '{part['part_name']}' available.")
 
-        # 1. Decrement inventory
-        new_stock = part["quantity"] - req.quantity
-        conn.execute("UPDATE inventory SET quantity=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                     (new_stock, req.part_id))
+        # Fetch new remaining stock
+        new_stock = conn.execute("SELECT quantity FROM inventory WHERE id=?", (req.part_id,)).fetchone()["quantity"]
 
         # 2. Record inventory transaction
         conn.execute("""
@@ -1018,6 +1095,9 @@ async def upload_repair_photo(
     if len(content) > MAX_FILE_SIZE:
         conn.close()
         raise HTTPException(400, "Photo size exceeds 5MB limit.")
+    if not validate_file_magic_bytes(content, ext):
+        conn.close()
+        raise HTTPException(400, f"File content does not match image extension '{ext}' (spoofed or invalid file format).")
 
     filename = f"repair_{job_id}_{stage}_{uuid.uuid4().hex[:8]}.{ext}"
     filepath = os.path.join(UPLOAD_DIR, filename)
@@ -1273,4 +1353,128 @@ def get_batch_repairs(batch_id: str, current_user: dict = Depends(get_current_us
         "total_actual_cost": total_actual,
         "jobs": job_list
     }
+
+
+class AdminRepairUpdateRequest(BaseModel):
+    device_type: Optional[str] = None
+    brand: Optional[str] = None
+    model: Optional[str] = None
+    problem_description: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    estimated_cost: Optional[float] = None
+    actual_cost: Optional[float] = None
+    technician_id: Optional[int] = None
+    service_type: Optional[str] = None
+    pickup_address: Optional[str] = None
+    technician_notes: Optional[str] = None
+
+
+@router.put("/{job_id}")
+def admin_update_repair(job_id: int, req: AdminRepairUpdateRequest, current_user: dict = Depends(require_role("admin"))):
+    """Admin full edit of any repair job details."""
+    conn = get_db()
+    job = conn.execute("SELECT * FROM repair_jobs WHERE id=?", (job_id,)).fetchone()
+    if not job:
+        conn.close()
+        raise HTTPException(404, "Repair job not found.")
+
+    device_id = job["device_id"]
+    if req.device_type or req.brand or req.model:
+        dev = conn.execute("SELECT * FROM devices WHERE id=?", (device_id,)).fetchone()
+        if dev:
+            conn.execute("""
+                UPDATE devices
+                SET device_type=COALESCE(?, device_type),
+                    brand=COALESCE(?, brand),
+                    model=COALESCE(?, model)
+                WHERE id=?
+            """, (req.device_type, req.brand, req.model, device_id))
+
+    from_status = job["status"]
+    to_status = req.status or from_status
+
+    conn.execute("""
+        UPDATE repair_jobs
+        SET problem_description=COALESCE(?, problem_description),
+            status=COALESCE(?, status),
+            priority=COALESCE(?, priority),
+            estimated_cost=COALESCE(?, estimated_cost),
+            actual_cost=COALESCE(?, actual_cost),
+            technician_id=COALESCE(?, technician_id),
+            service_type=COALESCE(?, service_type),
+            pickup_address=COALESCE(?, pickup_address),
+            technician_notes=COALESCE(?, technician_notes),
+            updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (
+        req.problem_description,
+        req.status,
+        req.priority,
+        req.estimated_cost,
+        req.actual_cost,
+        req.technician_id,
+        req.service_type,
+        req.pickup_address,
+        req.technician_notes,
+        job_id
+    ))
+
+    if req.status and req.status != from_status:
+        conn.execute("""
+            INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+            VALUES (?, ?, ?, ?, 'Status updated by Admin in full edit')
+        """, (job_id, from_status, to_status, current_user["id"]))
+
+    conn.commit()
+    conn.close()
+
+    try:
+        log_audit_event(
+            user=current_user,
+            action="REPAIR_UPDATED_BY_ADMIN",
+            entity="repair_jobs",
+            entity_id=job_id,
+            details={"repair_id": job["repair_id"], "from_status": from_status, "to_status": to_status}
+        )
+    except Exception:
+        pass
+
+    return {"message": f"Repair {job['repair_id']} updated successfully by Admin.", "id": job_id}
+
+
+@router.delete("/{job_id}")
+def admin_delete_repair(job_id: int, current_user: dict = Depends(require_role("admin"))):
+    """Admin deletes/removes a repair job."""
+    conn = get_db()
+    job = conn.execute("SELECT * FROM repair_jobs WHERE id=?", (job_id,)).fetchone()
+    if not job:
+        conn.close()
+        raise HTTPException(404, "Repair job not found.")
+
+    conn.execute("DELETE FROM repair_status_history WHERE repair_job_id=?", (job_id,))
+    conn.execute("DELETE FROM repair_photos WHERE repair_job_id=?", (job_id,))
+    conn.execute("DELETE FROM notifications WHERE repair_job_id=?", (job_id,))
+    conn.execute("DELETE FROM feedback WHERE repair_job_id=?", (job_id,))
+    conn.execute("DELETE FROM repair_item_warranties WHERE repair_job_id=?", (job_id,))
+    conn.execute("DELETE FROM warranty_claims WHERE repair_job_id=?", (job_id,))
+    conn.execute("DELETE FROM warranties WHERE repair_job_id=?", (job_id,))
+    conn.execute("DELETE FROM bills WHERE repair_job_id=?", (job_id,))
+    conn.execute("DELETE FROM repair_jobs WHERE id=?", (job_id,))
+    conn.commit()
+    conn.close()
+
+    try:
+        log_audit_event(
+            user=current_user,
+            action="REPAIR_DELETED_BY_ADMIN",
+            entity="repair_jobs",
+            entity_id=job_id,
+            details={"repair_id": job["repair_id"]}
+        )
+    except Exception:
+        pass
+
+    return {"message": f"Repair {job['repair_id']} deleted successfully."}
+
 

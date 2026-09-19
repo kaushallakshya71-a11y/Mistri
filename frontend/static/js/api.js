@@ -41,7 +41,17 @@ const api = {
         }
         if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-            throw new Error(err.detail || 'Request failed');
+            let message = err.message || err.detail || `HTTP ${res.status}`;
+            if (Array.isArray(err.detail)) {
+                message = err.detail.map(d => {
+                    if (typeof d === 'string') return d;
+                    const field = d.loc && d.loc.length > 1 ? d.loc.slice(1).join('.') : '';
+                    return field ? `${field}: ${d.msg || JSON.stringify(d)}` : (d.msg || JSON.stringify(d));
+                }).join(', ');
+            } else if (typeof err.detail === 'object' && err.detail !== null) {
+                message = err.detail.msg || JSON.stringify(err.detail);
+            }
+            throw new Error(message);
         }
         if (res.headers.get('content-type')?.includes('application/json')) {
             return res.json();
@@ -97,7 +107,7 @@ const api = {
     async register(data) {
         const res = await this.post('/auth/register', data);
         this.setToken(res.access_token);
-        localStorage.setItem('mistri_user', JSON.stringify({ name: res.name, role: res.role }));
+        localStorage.setItem('mistri_user', JSON.stringify({ name: res.name, role: res.role, user_id: res.user_id }));
         return res;
     },
     getUser() {

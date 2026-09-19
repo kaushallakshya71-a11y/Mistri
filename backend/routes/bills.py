@@ -12,10 +12,13 @@ from utils.qrcode_gen import generate_qr_base64
 from utils.audit import log_audit_event
 from datetime import datetime
 import io
+import re
 import qrcode
 import urllib.parse
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
+
+UTR_PATTERN = re.compile(r'^[A-Za-z0-9]{10,22}$')
 
 class BillCreate(BaseModel):
     repair_job_id: int
@@ -36,6 +39,9 @@ class PaymentVerifyRequest(BaseModel):
     action: str  # Approve | Reject | Refund
     notes: Optional[str] = None
 
+class InvoiceActionRequest(BaseModel):
+    reason: str
+
 class CreateOfferRequest(BaseModel):
     code: str
     title: str
@@ -49,7 +55,8 @@ class CreateOfferRequest(BaseModel):
     target_customer_id: Optional[int] = None
 
 class ApplyOfferRequest(BaseModel):
-    offer_code: str
+    offer_code: Optional[str] = None
+    coupon_code: Optional[str] = None
 
 @router.post("/generate")
 def generate_bill(req: BillCreate, current_user: dict = Depends(require_role("admin"))):
@@ -147,6 +154,10 @@ def get_bill(bill_id: int, current_user: dict = Depends(get_current_user)):
     conn.close()
     if not bill:
         raise HTTPException(404, "Bill not found")
+
+    if current_user["role"] == "customer" and bill["customer_id"] != current_user["id"]:
+        raise HTTPException(403, "Access denied. You can only access your own bills.")
+
     return dict(bill)
 
 @router.get("/{bill_id}/upi-qr")
@@ -157,6 +168,9 @@ def get_bill_upi_qr(bill_id: int, current_user: dict = Depends(get_current_user)
     conn.close()
     if not bill:
         raise HTTPException(404, "Bill not found")
+
+    if current_user["role"] == "customer" and bill["customer_id"] != current_user["id"]:
+        raise HTTPException(403, "Access denied. You can only access your own bills.")
 
     upi_intent = bill["upi_qr_url"]
     if not upi_intent:
@@ -185,13 +199,32 @@ def record_online_payment(bill_id: int, req: OnlinePaymentRequest, current_user:
         conn.close()
         raise HTTPException(404, "Bill not found")
 
+    if current_user["role"] == "customer" and bill["customer_id"] != current_user["id"]:
+        conn.close()
+        raise HTTPException(403, "Access denied. You can only submit payment for your own bills.")
+
+    if bill["payment_status"] == "Paid":
+        conn.close()
+        raise HTTPException(400, "This bill has already been verified and marked as Paid.")
+
+    txn_id = req.transaction_id.strip()
+    if not UTR_PATTERN.match(txn_id) or len(set(txn_id.lower())) <= 2:
+        conn.close()
+        raise HTTPException(400, "Invalid UTR format. Please enter a valid 10-22 character alphanumeric reference.")
+
+    # Prevent duplicate UTR submission
+    dup = conn.execute("SELECT id FROM payments WHERE transaction_id = ? AND status != 'Failed'", (txn_id,)).fetchone()
+    if dup:
+        conn.close()
+        raise HTTPException(400, f"UTR / Reference '{txn_id}' has already been submitted or verified.")
+
     is_admin = (current_user.get("role") == "admin")
     new_status = "Paid" if is_admin else "Pending"
     payment_status_record = "Confirmed" if is_admin else "Pending"
 
     conn.execute("""
         UPDATE bills SET payment_status=?, payment_method=?, transaction_id=? WHERE id=?
-    """, (new_status, req.payment_method, req.transaction_id.strip(), bill_id))
+    """, (new_status, req.payment_method, txn_id, bill_id))
 
     cursor = conn.execute("""
         INSERT INTO payments (bill_id, amount, payment_method, transaction_id, status, verified_by, verified_at, notes)
@@ -200,7 +233,7 @@ def record_online_payment(bill_id: int, req: OnlinePaymentRequest, current_user:
         bill_id,
         bill["total_amount"],
         req.payment_method,
-        req.transaction_id.strip(),
+        txn_id,
         payment_status_record,
         current_user["id"] if is_admin else None,
         datetime.now().isoformat() if is_admin else None,
@@ -231,7 +264,7 @@ def record_online_payment(bill_id: int, req: OnlinePaymentRequest, current_user:
             conn.execute("""
                 INSERT INTO notifications (user_id, repair_job_id, title, message)
                 VALUES (?, ?, 'Payment Verification Needed 💳', ?)
-            """, (a["id"], bill["repair_job_id"], f"Customer submitted UPI payment of ₹{bill['total_amount']:.2f} for Bill {bill['bill_number']} (Ref: {req.transaction_id.strip()})."))
+            """, (a["id"], bill["repair_job_id"], f"Customer submitted UPI payment of ₹{bill['total_amount']:.2f} for Bill {bill['bill_number']} (Ref: {txn_id})."))
 
     conn.commit()
     conn.close()
@@ -241,7 +274,7 @@ def record_online_payment(bill_id: int, req: OnlinePaymentRequest, current_user:
         action="ONLINE_PAYMENT_SUBMITTED" if not is_admin else "ONLINE_PAYMENT_VERIFIED",
         entity="bills",
         entity_id=bill_id,
-        details={"transaction_id": req.transaction_id, "amount": bill["total_amount"], "status": new_status}
+        details={"transaction_id": txn_id, "amount": bill["total_amount"], "status": new_status}
     )
 
     msg = "Payment recorded and verified successfully." if is_admin else "Payment reference submitted! Verification pending by Admin."
@@ -249,7 +282,7 @@ def record_online_payment(bill_id: int, req: OnlinePaymentRequest, current_user:
         "message": msg,
         "bill_id": bill_id,
         "payment_status": new_status,
-        "transaction_id": req.transaction_id
+        "transaction_id": txn_id
     }
 
 @router.post("/{bill_id}/cash-payment")
@@ -364,18 +397,22 @@ def verify_payment(bill_id: int, req: PaymentVerifyRequest, current_user: dict =
         """, (bill["customer_id"], bill["repair_job_id"], f"Your payment of ₹{bill['total_amount']:.2f} has been verified by Admin. 180-day warranty is now active!"))
 
     elif action == "Reject":
+        if not req.notes or len(req.notes.strip()) < 3:
+            conn.close()
+            raise HTTPException(400, "A clear rejection reason (min 3 characters) is required when rejecting a payment.")
+
         conn.execute("""
             UPDATE bills SET payment_status='Failed', notes=? WHERE id=?
-        """, (req.notes or "Payment verification rejected by Admin", bill_id))
+        """, (req.notes.strip(), bill_id))
 
         conn.execute("""
             UPDATE payments SET status='Failed', notes=? WHERE bill_id=? AND status='Pending'
-        """, (req.notes or "Verification rejected", bill_id))
+        """, (req.notes.strip(), bill_id))
 
         conn.execute("""
             INSERT INTO notifications (user_id, repair_job_id, title, message)
             VALUES (?, ?, 'Payment Verification Failed ⚠️', ?)
-        """, (bill["customer_id"], bill["repair_job_id"], f"Payment verification for Bill {bill['bill_number']} was unsuccessful. Reason: {req.notes or 'Incorrect transaction reference'}. Please retry payment."))
+        """, (bill["customer_id"], bill["repair_job_id"], f"Payment verification for Bill {bill['bill_number']} was unsuccessful. Reason: {req.notes.strip()}. Please retry payment."))
 
     elif action == "Refund":
         conn.execute("""
@@ -428,6 +465,9 @@ def download_invoice_pdf(bill_id: int, current_user: dict = Depends(get_current_
 
     if not bill:
         raise HTTPException(404, "Bill not found")
+
+    if current_user["role"] == "customer" and bill["customer_id"] != current_user["id"]:
+        raise HTTPException(403, "Access denied. You can only download your own invoice.")
 
     bill = dict(bill)
     buffer = io.BytesIO()
@@ -482,13 +522,23 @@ def download_invoice_pdf(bill_id: int, current_user: dict = Depends(get_current_
     elements.append(Spacer(1, 0.4*cm))
 
     # Payment status & Embedded UPI QR Code
+    is_void = (bill.get('is_void') == 1 or bill['payment_status'] == 'Void')
+    is_cancelled = (bill.get('is_cancelled') == 1 or bill['payment_status'] == 'Cancelled')
     is_paid = (bill['payment_status'] == 'Paid')
-    status_text = f"<font color='{'#27AE60' if is_paid else '#E74C3C'}'><b>PAYMENT STATUS: {bill['payment_status'].upper()}</b></font>"
+    
+    if is_void:
+        status_text = "<font color='#E74C3C'><b>PAYMENT STATUS: VOID (INVOICE VOIDED)</b></font>"
+    elif is_cancelled:
+        status_text = "<font color='#E74C3C'><b>PAYMENT STATUS: CANCELLED</b></font>"
+    elif is_paid:
+        status_text = "<font color='#27AE60'><b>PAYMENT STATUS: PAID</b></font>"
+    else:
+        status_text = f"<font color='#E67E22'><b>PAYMENT STATUS: {bill['payment_status'].upper()}</b></font>"
     elements.append(Paragraph(status_text, styles['Normal']))
 
-    if not is_paid:
+    if not is_paid and not is_void and not is_cancelled:
         # Embed Dynamic Scannable UPI QR Code in PDF!
-        upi_url = bill.get("upi_qr_url") or f"upi://pay?pa=mistri@upi&pn=Mistri%20Electrical%2FElectronic&am={bill['total_amount']:.2f}&cu=INR&tn=Invoice-{bill['bill_number']}"
+        upi_url = dict(bill).get("upi_qr_url") or f"upi://pay?pa=mistri@upi&pn=Mistri%20Electrical%2FElectronic&am={bill['total_amount']:.2f}&cu=INR&tn=Invoice-{bill['bill_number']}"
         qr = qrcode.make(upi_url)
         qr_buf = io.BytesIO()
         qr.save(qr_buf, format="PNG")
@@ -534,6 +584,14 @@ def mark_paid(bill_id: int, current_user: dict = Depends(require_role("admin")))
     conn.close()
     return {"message": "Payment recorded"}
 
+def calculate_bill_totals(labour_charge: float, parts_cost: float, discount: float, tax_rate: float = 0.09):
+    subtotal = round(float(labour_charge) + float(parts_cost), 2)
+    effective_discount = round(min(subtotal, max(0.0, float(discount))), 2)
+    taxable = round(subtotal - effective_discount, 2)
+    tax = round(taxable * tax_rate, 2)
+    total = round(taxable + tax, 2)
+    return subtotal, effective_discount, taxable, tax, total
+
 class BillUpdate(BaseModel):
     labour_charge: Optional[float] = None
     parts_cost: Optional[float] = None
@@ -544,30 +602,175 @@ class BillUpdate(BaseModel):
 
 @router.put("/{bill_id}")
 def update_bill(bill_id: int, req: BillUpdate, current_user: dict = Depends(require_role("admin"))):
-    """Admin can edit bill charges and payment status."""
+    """Admin can edit bill charges and payment status. Modifying financial values of settled or void invoices is blocked."""
     conn = get_db()
     bill = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
     if not bill:
         conn.close()
         raise HTTPException(404, "Bill not found")
 
+    bill_dict = dict(bill)
+    is_settled_or_inactive = (
+        bill["payment_status"] in ("Paid", "Void", "Cancelled") or
+        bill_dict.get("is_void") == 1 or
+        bill_dict.get("is_cancelled") == 1
+    )
+
+    if is_settled_or_inactive:
+        if (req.labour_charge is not None and req.labour_charge != bill["labour_charge"]) or \
+           (req.parts_cost is not None and req.parts_cost != bill["parts_cost"]) or \
+           (req.discount is not None and req.discount != bill["discount"]) or \
+           (req.tax_rate is not None and req.tax_rate != 0.09):
+            conn.close()
+            raise HTTPException(400, "Cannot modify financial figures of a Paid, Void, or Cancelled invoice.")
+
     labour = req.labour_charge if req.labour_charge is not None else bill["labour_charge"]
     parts = req.parts_cost if req.parts_cost is not None else bill["parts_cost"]
     discount = req.discount if req.discount is not None else bill["discount"]
     tax_rate = req.tax_rate if req.tax_rate is not None else 0.09
-    taxable = max(0, labour + parts - discount)
-    tax = round(taxable * tax_rate, 2)
-    total = round(taxable + tax, 2)
+    subtotal, effective_discount, taxable, tax, total = calculate_bill_totals(labour, parts, discount, tax_rate)
     status = req.payment_status or bill["payment_status"]
     notes = req.notes if req.notes is not None else bill["notes"]
 
     conn.execute("""
         UPDATE bills SET labour_charge=?, parts_cost=?, discount=?, tax=?,
         total_amount=?, payment_status=?, notes=? WHERE id=?
-    """, (labour, parts, discount, tax, total, status, notes, bill_id))
+    """, (labour, parts, effective_discount, tax, total, status, notes, bill_id))
     conn.commit()
     conn.close()
     return {"message": "Bill updated", "total": total}
+
+@router.post("/{bill_id}/void")
+def void_bill(bill_id: int, req: InvoiceActionRequest, current_user: dict = Depends(require_role("admin"))):
+    """Admin voids an invoice with a mandatory audit reason."""
+    reason = req.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(400, "A valid reason (minimum 3 characters) is required to void an invoice.")
+
+    conn = get_db()
+    bill = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
+    if not bill:
+        conn.close()
+        raise HTTPException(404, "Bill not found")
+
+    bill_dict = dict(bill)
+    if bill_dict.get("is_void") == 1:
+        conn.close()
+        raise HTTPException(400, "This invoice is already void.")
+
+    conn.execute("""
+        UPDATE bills SET is_void=1, void_reason=?, payment_status='Void', action_by=?, action_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (reason, current_user["id"], bill_id))
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        current_user,
+        action="INVOICE_VOIDED",
+        entity="bills",
+        entity_id=bill_id,
+        details={"bill_number": bill["bill_number"], "reason": reason}
+    )
+    return {"message": f"Invoice #{bill['bill_number']} has been voided.", "bill_id": bill_id, "status": "Void"}
+
+@router.post("/{bill_id}/cancel")
+def cancel_bill(bill_id: int, req: InvoiceActionRequest, current_user: dict = Depends(require_role("admin"))):
+    """Admin cancels an unpaid invoice with a mandatory audit reason."""
+    reason = req.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(400, "A valid reason (minimum 3 characters) is required to cancel an invoice.")
+
+    conn = get_db()
+    bill = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
+    if not bill:
+        conn.close()
+        raise HTTPException(404, "Bill not found")
+
+    if bill["payment_status"] == "Paid":
+        conn.close()
+        raise HTTPException(400, "Cannot cancel an already Paid bill. Use refund or void instead.")
+
+    bill_dict = dict(bill)
+    if bill_dict.get("is_cancelled") == 1:
+        conn.close()
+        raise HTTPException(400, "This invoice is already cancelled.")
+
+    conn.execute("""
+        UPDATE bills SET is_cancelled=1, void_reason=?, payment_status='Cancelled', action_by=?, action_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (reason, current_user["id"], bill_id))
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        current_user,
+        action="INVOICE_CANCELLED",
+        entity="bills",
+        entity_id=bill_id,
+        details={"bill_number": bill["bill_number"], "reason": reason}
+    )
+    return {"message": f"Invoice #{bill['bill_number']} has been cancelled.", "bill_id": bill_id, "status": "Cancelled"}
+
+@router.post("/{bill_id}/archive")
+def archive_bill(bill_id: int, req: InvoiceActionRequest, current_user: dict = Depends(require_role("admin"))):
+    """Admin archives an invoice without deleting it."""
+    reason = req.reason.strip()
+    conn = get_db()
+    bill = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
+    if not bill:
+        conn.close()
+        raise HTTPException(404, "Bill not found")
+
+    conn.execute("""
+        UPDATE bills SET is_archived=1, action_by=?, action_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (current_user["id"], bill_id))
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        current_user,
+        action="INVOICE_ARCHIVED",
+        entity="bills",
+        entity_id=bill_id,
+        details={"bill_number": bill["bill_number"], "reason": reason}
+    )
+    return {"message": f"Invoice #{bill['bill_number']} has been archived.", "bill_id": bill_id}
+
+@router.delete("/{bill_id}")
+def delete_bill(bill_id: int, current_user: dict = Depends(require_role("admin"))):
+    """
+    Non-destructive invoice cancellation.
+    Soft-cancels the invoice instead of deleting historical financial records.
+    """
+    conn = get_db()
+    bill = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
+    if not bill:
+        conn.close()
+        raise HTTPException(404, "Bill not found")
+
+    if bill["payment_status"] == "Paid":
+        conn.close()
+        raise HTTPException(400, "Cannot delete or cancel a Paid invoice. Use refund or void instead.")
+
+    conn.execute("""
+        UPDATE bills SET is_cancelled=1, void_reason='Cancelled via invoice delete request',
+        payment_status='Cancelled', action_by=?, action_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (current_user["id"], bill_id))
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        current_user,
+        action="INVOICE_SOFT_DELETED",
+        entity="bills",
+        entity_id=bill_id,
+        details={"bill_number": bill["bill_number"]}
+    )
+    return {"message": f"Bill #{bill['bill_number']} successfully cancelled."}
+
 
 # ---------------------------------------------------------------------------
 # Customer Special Offers & Festival Coupons
@@ -662,25 +865,61 @@ def toggle_offer(offer_id: int, current_user: dict = Depends(require_role("admin
     conn.close()
     return {"message": f"Offer {'deactivated' if new_state == 0 else 'activated'} successfully"}
 
-@router.post("/{bill_id}/apply-offer")
-def apply_offer_to_bill(bill_id: int, req: ApplyOfferRequest, current_user: dict = Depends(get_current_user)):
-    """Apply discount coupon / festival offer to bill."""
+@router.put("/offers/{offer_id}")
+def update_offer(offer_id: int, req: CreateOfferRequest, current_user: dict = Depends(require_role("admin"))):
+    """Admin updates an existing offer."""
     conn = get_db()
+    offer = conn.execute("SELECT id FROM customer_offers WHERE id=?", (offer_id,)).fetchone()
+    if not offer:
+        conn.close()
+        raise HTTPException(404, "Offer not found")
+    conn.execute("""
+        UPDATE customer_offers 
+        SET code=?, title=?, description=?, discount_type=?, discount_value=?,
+            min_bill_amount=?, max_discount=?, valid_from=?, valid_until=?,
+            target_customer_id=?, usage_limit=?, per_customer_limit=?
+        WHERE id=?
+    """, (req.code.strip().upper(), req.title, req.description, req.discount_type,
+          req.discount_value, req.min_bill_amount, req.max_discount,
+          req.valid_from, req.valid_until, req.target_customer_id,
+          getattr(req, 'usage_limit', None), getattr(req, 'per_customer_limit', 1),
+          offer_id))
+    conn.commit()
+    conn.close()
+    return {"message": "Offer updated successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Core Unified Coupon / Offer Application Logic
+# ---------------------------------------------------------------------------
+
+def _apply_offer_core(bill_id: int, raw_code: str, current_user: dict):
+    if not raw_code or not raw_code.strip():
+        raise HTTPException(400, "Coupon code cannot be empty.")
+
+    code = raw_code.strip().upper()
+    conn = get_db()
+
     bill = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
     if not bill:
         conn.close()
         raise HTTPException(404, "Bill not found")
 
-    if bill["payment_status"] in ("Paid", "Refunded"):
+    if current_user["role"] == "customer" and bill["customer_id"] != current_user["id"]:
         conn.close()
-        raise HTTPException(400, "Cannot apply offer to an already settled bill.")
+        raise HTTPException(403, "Access denied. You can only apply offers to your own bills.")
 
-    code = req.offer_code.strip().upper()
-    offer = conn.execute("SELECT * FROM customer_offers WHERE code=?", (code,)).fetchone()
+    bill_dict = dict(bill)
+    if bill["payment_status"] in ("Paid", "Refunded", "Void", "Cancelled") or bill_dict.get("is_void") == 1 or bill_dict.get("is_cancelled") == 1:
+        conn.close()
+        raise HTTPException(400, "Cannot apply offer to an already settled, void, or cancelled bill.")
+
+    offer = conn.execute("SELECT * FROM customer_offers WHERE code=? COLLATE NOCASE", (code,)).fetchone()
     if not offer:
         conn.close()
         raise HTTPException(404, f"Offer code '{code}' is invalid.")
 
+    offer_dict = dict(offer)
     if offer["is_active"] != 1:
         conn.close()
         raise HTTPException(400, "This offer is no longer active.")
@@ -698,10 +937,26 @@ def apply_offer_to_bill(bill_id: int, req: ApplyOfferRequest, current_user: dict
         conn.close()
         raise HTTPException(403, "This offer is personalized for another customer.")
 
-    subtotal = bill["labour_charge"] + bill["parts_cost"]
-    if subtotal < (offer["min_bill_amount"] or 0):
+    # Check overall usage limit
+    if offer_dict.get("usage_limit") and (offer_dict.get("usage_count") or 0) >= offer["usage_limit"]:
         conn.close()
-        raise HTTPException(400, f"Minimum bill amount of ₹{offer['min_bill_amount']:.2f} required for this coupon.")
+        raise HTTPException(400, "This offer has reached its maximum total usage limit.")
+
+    # Check per-customer limit
+    per_cust_limit = offer_dict.get("per_customer_limit") or 1
+    cust_usage = conn.execute(
+        "SELECT COUNT(*) FROM offer_redemptions WHERE offer_id=? AND customer_id=?",
+        (offer["id"], bill["customer_id"])
+    ).fetchone()[0]
+    if cust_usage >= per_cust_limit:
+        conn.close()
+        raise HTTPException(400, f"You have already redeemed this offer the maximum allowed number of times ({per_cust_limit}).")
+
+    subtotal = bill["labour_charge"] + bill["parts_cost"]
+    min_amount = offer["min_bill_amount"] or 0
+    if subtotal < min_amount:
+        conn.close()
+        raise HTTPException(400, f"Minimum bill amount of ₹{min_amount:.2f} required for this coupon. Your subtotal is ₹{subtotal:.2f}.")
 
     if offer["discount_type"] == "percentage":
         discount = subtotal * (offer["discount_value"] / 100.0)
@@ -711,13 +966,12 @@ def apply_offer_to_bill(bill_id: int, req: ApplyOfferRequest, current_user: dict
         discount = min(subtotal, offer["discount_value"])
 
     discount = round(discount, 2)
-    taxable = max(0.0, subtotal - discount)
-    tax = round(taxable * 0.09, 2)
-    total = round(taxable + tax, 2)
+    subtotal, effective_discount, taxable, tax, total = calculate_bill_totals(bill["labour_charge"], bill["parts_cost"], discount, 0.09)
 
-    # Re-generate UPI string
-    shop_id = bill["shop_id"] if bill["shop_id"] else 1
-    shop_branch = conn.execute("SELECT upi_id FROM shops WHERE id=?", (shop_id,)).fetchone()
+    # Re-generate UPI intent with proper shop UPI ID
+    job_shop_id = bill["shop_id"] if bill_dict.get("shop_id") else 1
+    shop_branch = conn.execute("SELECT upi_id FROM shops WHERE id=?", (job_shop_id,)).fetchone()
+    upi_pa = shop_branch["upi_id"] if shop_branch and shop_branch["upi_id"] else "mistri@upi"
     b_num = bill["bill_number"]
     new_upi_intent = (
         f"upi://pay?pa={upi_pa}"
@@ -728,12 +982,20 @@ def apply_offer_to_bill(bill_id: int, req: ApplyOfferRequest, current_user: dict
     )
 
     conn.execute("""
-        UPDATE bills SET discount=?, offer_code=?, offer_discount=?, tax=?, total_amount=?, upi_qr_url=?
+        UPDATE bills SET discount=?, offer_code=?, offer_discount=?, tax=?, total_amount=?, upi_qr_url=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-    """, (discount, code, discount, tax, total, new_upi_intent, bill_id))
+    """, (effective_discount, code, effective_discount, tax, total, new_upi_intent, bill_id))
 
-    # Update actual cost in repair job
     conn.execute("UPDATE repair_jobs SET actual_cost=? WHERE id=?", (total, bill["repair_job_id"]))
+
+    # Record redemption
+    conn.execute("""
+        INSERT INTO offer_redemptions (offer_id, customer_id, bill_id, discount_applied)
+        VALUES (?, ?, ?, ?)
+    """, (offer["id"], bill["customer_id"], bill_id, effective_discount))
+
+    # Increment usage count
+    conn.execute("UPDATE customer_offers SET usage_count=COALESCE(usage_count,0)+1 WHERE id=?", (offer["id"],))
 
     conn.commit()
     conn.close()
@@ -743,16 +1005,98 @@ def apply_offer_to_bill(bill_id: int, req: ApplyOfferRequest, current_user: dict
         action="OFFER_APPLIED",
         entity="bills",
         entity_id=bill_id,
-        details={"offer_code": code, "discount": discount, "new_total": total}
+        details={"offer_code": code, "discount": effective_discount, "new_total": total}
     )
 
     return {
-        "message": f"Coupon '{code}' applied! You saved ₹{discount:,.2f}.",
-        "discount": discount,
+        "message": f"Coupon '{code}' applied! You saved ₹{effective_discount:,.2f}.",
+        "discount": effective_discount,
         "tax": tax,
         "total_amount": total,
-        "offer_code": code
+        "final_amount": total,
+        "original_amount": subtotal,
+        "offer_code": code,
+        "offer_title": offer["title"]
     }
+
+
+class ApplyCouponRequest(BaseModel):
+    bill_id: int
+    offer_code: str
+
+@router.post("/{bill_id}/apply-offer")
+def apply_offer_to_bill(bill_id: int, req: ApplyOfferRequest, current_user: dict = Depends(get_current_user)):
+    """Apply discount coupon / festival offer to bill by route parameter."""
+    code = req.offer_code or req.coupon_code
+    return _apply_offer_core(bill_id, code, current_user)
+
+@router.post("/apply-offer")
+def apply_offer_by_body(req: ApplyCouponRequest, current_user: dict = Depends(get_current_user)):
+    """Apply discount coupon / festival offer to bill by request body."""
+    return _apply_offer_core(req.bill_id, req.offer_code, current_user)
+
+@router.delete("/apply-offer/{bill_id}")
+def remove_offer_from_bill(bill_id: int, current_user: dict = Depends(get_current_user)):
+    """Remove applied offer from bill and restore original subtotal and GST."""
+    conn = get_db()
+    bill = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
+    if not bill:
+        conn.close()
+        raise HTTPException(404, "Bill not found")
+
+    if current_user["role"] == "customer" and bill["customer_id"] != current_user["id"]:
+        conn.close()
+        raise HTTPException(403, "Access denied. You can only remove offers from your own bills.")
+
+    bill_dict = dict(bill)
+    if not bill_dict.get("offer_code"):
+        conn.close()
+        raise HTTPException(400, "No offer applied to this bill.")
+
+    if bill["payment_status"] in ("Paid", "Refunded", "Void", "Cancelled"):
+        conn.close()
+        raise HTTPException(400, "Cannot modify an already settled or cancelled bill.")
+
+    subtotal, effective_discount, taxable, tax, original_total = calculate_bill_totals(bill["labour_charge"], bill["parts_cost"], 0, 0.09)
+
+    # Re-generate standard UPI intent
+    job_shop_id = bill["shop_id"] if bill_dict.get("shop_id") else 1
+    shop_branch = conn.execute("SELECT upi_id FROM shops WHERE id=?", (job_shop_id,)).fetchone()
+    upi_pa = shop_branch["upi_id"] if shop_branch and shop_branch["upi_id"] else "mistri@upi"
+    b_num = bill["bill_number"]
+    restored_upi_intent = (
+        f"upi://pay?pa={upi_pa}"
+        f"&pn={urllib.parse.quote('Mistri Electrical/Electronic')}"
+        f"&am={original_total:.2f}"
+        f"&cu=INR"
+        f"&tn={urllib.parse.quote(f'Invoice {b_num}')}"
+    )
+
+    conn.execute("""
+        UPDATE bills SET discount=0, offer_code=NULL, offer_discount=0, tax=?, total_amount=?, upi_qr_url=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (tax, original_total, restored_upi_intent, bill_id))
+
+    conn.execute("UPDATE repair_jobs SET actual_cost=? WHERE id=?", (original_total, bill["repair_job_id"]))
+
+    # Remove redemption record
+    offer_code = bill["offer_code"]
+    offer = conn.execute("SELECT id FROM customer_offers WHERE code=?", (offer_code,)).fetchone()
+    if offer:
+        conn.execute("""
+            DELETE FROM offer_redemptions WHERE offer_id=? AND customer_id=? AND bill_id=?
+        """, (offer["id"], bill["customer_id"], bill_id))
+        conn.execute("UPDATE customer_offers SET usage_count=MAX(0, COALESCE(usage_count,1)-1) WHERE id=?", (offer["id"],))
+
+    conn.commit()
+    conn.close()
+    return {"message": "Offer removed", "restored_amount": original_total}
+
+@router.delete("/{bill_id}/remove-offer")
+def remove_offer_from_bill_alt(bill_id: int, current_user: dict = Depends(get_current_user)):
+    """Alternate route for removing offer from bill."""
+    return remove_offer_from_bill(bill_id, current_user)
+
 
 # ---------------------------------------------------------------------------
 # Payment Audit & Cash Report
@@ -828,3 +1172,4 @@ def get_payments_report(
             "cash_by_staff": [dict(s) for s in cash_by_staff_rows]
         }
     }
+

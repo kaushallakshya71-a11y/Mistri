@@ -72,7 +72,7 @@ function renderLandingPage() {
 function renderLogin() {
     document.getElementById('navbar').style.display = 'none';
     setContent(`
-        <div class="auth-page">
+        <div class="auth-page animate-fade-in">
             <!-- Left Panel: Branding + Image -->
             <div class="auth-left">
                 <div class="auth-left-content">
@@ -96,7 +96,7 @@ function renderLogin() {
 
             <!-- Right Panel: Login Form -->
             <div class="auth-right">
-                <div class="auth-card">
+                <div class="auth-card animate-scale-in">
                     <div class="auth-title">Welcome Back 👋</div>
                     <div class="auth-sub">Sign in to your Mistri account</div>
 
@@ -476,7 +476,7 @@ function renderPasswordStrengthUI(password, containerId) {
 function renderRegister() {
     document.getElementById('navbar').style.display = 'none';
     setContent(`
-        <div class="auth-page">
+        <div class="auth-page animate-fade-in">
             <!-- Left Panel -->
             <div class="auth-left">
                 <div class="auth-left-content">
@@ -498,7 +498,7 @@ function renderRegister() {
 
             <!-- Right Panel: Register Form -->
             <div class="auth-right">
-                <div class="auth-card">
+                <div class="auth-card animate-scale-in">
                     <div class="auth-title">Create Account 🚀</div>
                     <div class="auth-sub">Join Mistri to track your repairs</div>
 

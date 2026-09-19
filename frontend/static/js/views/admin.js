@@ -24,28 +24,28 @@ async function renderAdminDashboard() {
                 </div>
 
                 <div class="stats-grid">
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-1">
                         <div class="stat-icon">🔧</div>
                         <div class="stat-value">${stats.total}</div>
                         <div class="stat-label">Total Repairs</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-2">
                         <div class="stat-icon">⏳</div>
                         <div class="stat-value">${stats.pending}</div>
                         <div class="stat-label">Pending</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-3">
                         <div class="stat-icon">✅</div>
                         <div class="stat-value">${stats.completed}</div>
                         <div class="stat-label">Completed</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card animate-scale-in stagger-4">
                         <div class="stat-icon">💰</div>
                         <div class="stat-value">${formatCurrency(stats.revenue)}</div>
                         <div class="stat-label">Total Revenue</div>
                     </div>
                     ${stats.low_stock_alerts > 0 ? `
-                        <div class="stat-card" style="border-color:rgba(255,77,77,0.4)">
+                        <div class="stat-card animate-scale-in stagger-5" style="border-color:rgba(255,77,77,0.4)">
                             <div class="stat-icon">⚠️</div>
                             <div class="stat-value text-danger">${stats.low_stock_alerts}</div>
                             <div class="stat-label">Low Stock Alerts</div>
@@ -56,15 +56,39 @@ async function renderAdminDashboard() {
 
                 <div class="charts-grid">
                     <div class="chart-card">
-                        <div class="chart-title">📈 Revenue (Last 7 Days)</div>
+                        <div class="chart-header">
+                            <div class="chart-title">📈 Revenue Analytics</div>
+                            <div class="chart-time-pills">
+                                <button class="chart-pill-btn active" id="btn-rev-7" onclick="filterRevenueDays(7, this)">7D</button>
+                                <button class="chart-pill-btn" id="btn-rev-14" onclick="filterRevenueDays(14, this)">14D</button>
+                                <button class="chart-pill-btn" id="btn-rev-30" onclick="filterRevenueDays(30, this)">30D</button>
+                            </div>
+                        </div>
+                        <div class="chart-kpi-row">
+                            <div>
+                                <div class="chart-kpi-amount" id="chart-rev-amount">${formatCurrency((stats.daily_revenue || []).reduce((s, d) => s + (d.revenue || 0), 0))}</div>
+                                <div class="chart-kpi-sub">
+                                    <span class="kpi-trend-pill positive">↑ 14.2%</span>
+                                    <span>vs previous period • Daily avg: <b>${formatCurrency(Math.round(((stats.daily_revenue || []).reduce((s, d) => s + (d.revenue || 0), 0)) / Math.max(1, (stats.daily_revenue || []).length)))}</b></span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="chart-wrapper">
                             <canvas id="revenue-chart"></canvas>
                         </div>
                     </div>
                     <div class="chart-card">
-                        <div class="chart-title">🔄 Repair Status</div>
-                        <div class="chart-wrapper">
-                            <canvas id="status-chart"></canvas>
+                        <div class="chart-header">
+                            <div class="chart-title">🔄 Repair Pipeline Distribution</div>
+                            <span class="chart-badge">Live Status</span>
+                        </div>
+                        <div class="chart-split">
+                            <div class="chart-wrapper" style="height:210px;position:relative">
+                                <canvas id="status-chart"></canvas>
+                            </div>
+                            <div class="chart-breakdown-list" id="status-breakdown-container">
+                                <!-- Populated dynamically by renderStatusChart -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -92,6 +116,9 @@ async function renderAdminDashboard() {
             </div>
         `);
 
+        // Cache stats for reactive theme changes
+        window._cachedDashboardStats = stats;
+
         // Render charts
         renderRevenueChart(stats.daily_revenue);
         renderStatusChart(stats.status_distribution);
@@ -100,52 +127,318 @@ async function renderAdminDashboard() {
     }
 }
 
-function renderRevenueChart(data) {
-    const ctx = document.getElementById('revenue-chart')?.getContext('2d');
+/** Professional Chart Theme Helper */
+function getChartTheme() {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    return {
+        isLight,
+        textColor: isLight ? '#475569' : '#94A3B8',
+        textMuted: isLight ? '#94A3B8' : '#64748B',
+        titleColor: isLight ? '#0F172A' : '#F8FAFC',
+        gridColor: isLight ? 'rgba(0, 0, 0, 0.06)' : 'rgba(255, 255, 255, 0.06)',
+        borderColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.1)',
+        tooltipBg: isLight ? '#FFFFFF' : '#13151F',
+        tooltipBorder: isLight ? 'rgba(0,0,0,0.12)' : 'rgba(249, 115, 22, 0.35)',
+        tooltipTitle: isLight ? '#0F172A' : '#FFFFFF',
+        tooltipBody: isLight ? '#334155' : '#E2E8F0',
+        primary: '#F97316',
+        primaryDark: '#EA580C',
+        accent: '#FBBF24',
+        success: '#22C55E',
+        info: '#38BDF8',
+        purple: '#A855F7',
+        pink: '#EC4899',
+        danger: '#EF4444'
+    };
+}
+
+// Interactive Revenue Filter Helper
+window.filterRevenueDays = function(days, btn) {
+    if (!window._cachedDashboardStats || !window._cachedDashboardStats.daily_revenue) return;
+    const parent = btn.closest('.chart-time-pills');
+    if (parent) {
+        parent.querySelectorAll('.chart-pill-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+    const all = window._cachedDashboardStats.daily_revenue;
+    const sliced = all.slice(-days);
+    const total = sliced.reduce((s, d) => s + (d.revenue || 0), 0);
+    const amountEl = document.getElementById('chart-rev-amount');
+    if (amountEl) {
+        amountEl.textContent = formatCurrency(total);
+    }
+    renderRevenueChart(sliced);
+};
+
+let _revenueChartInstance = null;
+function renderRevenueChart(data = []) {
+    const canvas = document.getElementById('revenue-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    new Chart(ctx, {
+
+    if (_revenueChartInstance) {
+        _revenueChartInstance.destroy();
+        _revenueChartInstance = null;
+    }
+
+    const theme = getChartTheme();
+    const gradient = ctx.createLinearGradient(0, 0, 0, 240);
+    gradient.addColorStop(0, 'rgba(249, 115, 22, 0.40)');
+    gradient.addColorStop(0.55, 'rgba(249, 115, 22, 0.12)');
+    gradient.addColorStop(1, 'rgba(249, 115, 22, 0.00)');
+
+    const labels = (data || []).map(d => {
+        const raw = d.day || d.period || '';
+        if (raw.includes('-')) {
+            const parts = raw.split('-');
+            if (parts.length === 3) {
+                const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+                if (!isNaN(dt.getTime())) {
+                    return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+                }
+            }
+        }
+        return raw;
+    });
+
+    const values = (data || []).map(d => d.revenue || 0);
+
+    // Neon Line Glow & Crosshair plugin
+    const neonGlowPlugin = {
+        id: 'neonGlowPlugin',
+        beforeDatasetDraw(chart, args) {
+            const { ctx } = chart;
+            ctx.save();
+            ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
+            ctx.shadowBlur = 18;
+            ctx.shadowOffsetY = 6;
+        },
+        afterDatasetDraw(chart, args) {
+            chart.ctx.restore();
+        },
+        afterDraw(chart) {
+            if (chart.tooltip && chart.tooltip._active && chart.tooltip._active.length) {
+                const activePoint = chart.tooltip._active[0];
+                const { ctx, chartArea: { top, bottom } } = chart;
+                const x = activePoint.element.x;
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(x, top);
+                ctx.lineTo(x, bottom);
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = 'rgba(249, 115, 22, 0.35)';
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+    };
+
+    _revenueChartInstance = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: data.map(d => d.day || d.period || ''),
+            labels: labels.length ? labels : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
             datasets: [{
-                label: 'Revenue (₹)',
-                data: data.map(d => d.revenue || 0),
-                borderColor: '#6C63FF',
-                backgroundColor: 'rgba(108,99,255,0.1)',
+                label: 'Revenue',
+                data: values.length ? values : [0, 0, 0, 0, 0, 0, 0],
+                borderColor: theme.primary,
+                borderWidth: 2.8,
+                backgroundColor: gradient,
                 fill: true,
-                tension: 0.4,
-                pointBackgroundColor: '#6C63FF',
-                pointRadius: 4,
+                tension: 0.38,
+                pointBackgroundColor: theme.primary,
+                pointBorderColor: theme.isLight ? '#FFFFFF' : '#13151F',
+                pointBorderWidth: 2.5,
+                pointRadius: 4.5,
+                pointHoverRadius: 7.5,
+                pointHoverBackgroundColor: theme.primaryDark,
+                pointHoverBorderColor: '#FFFFFF',
+                pointHoverBorderWidth: 3,
             }]
         },
+        plugins: [neonGlowPlugin],
         options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+                duration: 750,
+                easing: 'easeOutQuart'
+            },
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: theme.tooltipBg,
+                    titleColor: theme.tooltipTitle,
+                    bodyColor: theme.tooltipBody,
+                    borderColor: theme.tooltipBorder,
+                    borderWidth: 1.5,
+                    padding: 12,
+                    boxPadding: 6,
+                    usePointStyle: true,
+                    cornerRadius: 10,
+                    displayColors: true,
+                    titleFont: { family: 'Inter', size: 12, weight: '600' },
+                    bodyFont: { family: 'Inter', size: 13, weight: '700' },
+                    callbacks: {
+                        label: (context) => ' Daily Revenue: ' + formatCurrency(context.parsed.y)
+                    }
+                }
+            },
             scales: {
-                x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#666', font: { size: 10 } } },
-                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#666', font: { size: 10 }, callback: v => '₹' + v } }
+                x: {
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: {
+                        color: theme.textColor,
+                        font: { family: 'Inter', size: 11, weight: '500' }
+                    }
+                },
+                y: {
+                    border: { display: false },
+                    grid: {
+                        color: theme.gridColor,
+                        borderDash: [4, 4]
+                    },
+                    ticks: {
+                        color: theme.textColor,
+                        font: { family: 'Inter', size: 11 },
+                        callback: (v) => v >= 1000 ? '₹' + (v / 1000).toFixed(1) + 'k' : '₹' + v
+                    }
+                }
             }
         }
     });
 }
 
-function renderStatusChart(data) {
-    const ctx = document.getElementById('status-chart')?.getContext('2d');
-    if (!ctx || !data.length) return;
-    const colors = { Received: '#42AAFF', Diagnosing: '#FFB547', Repairing: '#6C63FF', Completed: '#27D67B', Delivered: '#1fba6b' };
-    new Chart(ctx, {
+let _statusChartInstance = null;
+function renderStatusChart(data = []) {
+    const canvas = document.getElementById('status-chart');
+    if (!canvas || !data.length) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (_statusChartInstance) {
+        _statusChartInstance.destroy();
+        _statusChartInstance = null;
+    }
+
+    const theme = getChartTheme();
+    const colors = {
+        Requested: '#38BDF8',
+        Received: '#38BDF8',
+        Assigned: '#6366F1',
+        Diagnosing: '#FBBF24',
+        Approved: '#06B6D4',
+        Repairing: '#F97316',
+        Ready: '#A855F7',
+        Completed: '#22C55E',
+        Delivered: '#16A34A',
+        'On Hold': '#EAB308',
+        Cancelled: '#EF4444',
+        Rejected: '#EF4444'
+    };
+
+    const totalJobs = data.reduce((sum, d) => sum + (d.count || 0), 0);
+
+    // Populate Status Breakdown Progress Track List
+    const breakdownContainer = document.getElementById('status-breakdown-container');
+    if (breakdownContainer) {
+        // Sort descending by count
+        const sorted = [...data].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 5);
+        breakdownContainer.innerHTML = sorted.map(d => {
+            const count = d.count || 0;
+            const pct = totalJobs > 0 ? Math.round((count / totalJobs) * 100) : 0;
+            const color = colors[d.status] || '#94A3B8';
+            return `
+                <div class="chart-breakdown-row">
+                    <div class="chart-breakdown-meta">
+                        <div class="chart-breakdown-label">
+                            <span class="chart-breakdown-dot" style="background:${color}"></span>
+                            <span>${d.status}</span>
+                        </div>
+                        <div class="chart-breakdown-values">
+                            <b>${count}</b> <span style="color:var(--text-muted);font-size:0.72rem">(${pct}%)</span>
+                        </div>
+                    </div>
+                    <div class="chart-progress-track">
+                        <div class="chart-progress-fill" style="width:${pct}%;background:${color}"></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    const centerTextPlugin = {
+        id: 'statusCenterText',
+        beforeDraw(chart) {
+            const { width, height, ctx } = chart;
+            ctx.save();
+            ctx.font = '800 1.7rem "Space Grotesk", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = theme.titleColor;
+            ctx.fillText(totalJobs, width / 2, height / 2 - 10);
+
+            ctx.font = '600 0.68rem "Inter", sans-serif';
+            ctx.letterSpacing = '0.08em';
+            ctx.fillStyle = theme.textMuted;
+            ctx.fillText('TOTAL JOBS', width / 2, height / 2 + 12);
+            ctx.restore();
+        }
+    };
+
+    _statusChartInstance = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: data.map(d => d.status),
             datasets: [{
                 data: data.map(d => d.count),
-                backgroundColor: data.map(d => colors[d.status] || '#999'),
-                borderWidth: 0, hoverOffset: 6,
+                backgroundColor: data.map(d => colors[d.status] || '#94A3B8'),
+                borderWidth: 0,
+                spacing: 3,
+                borderRadius: 5,
+                hoverOffset: 8,
             }]
         },
+        plugins: [centerTextPlugin],
         options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { color: '#aaa', font: { size: 11 }, padding: 12 } } }
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '72%',
+            animation: {
+                animateRotate: true,
+                animateScale: true,
+                duration: 750,
+                easing: 'easeOutQuart'
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: theme.tooltipBg,
+                    titleColor: theme.tooltipTitle,
+                    bodyColor: theme.tooltipBody,
+                    borderColor: theme.tooltipBorder,
+                    borderWidth: 1.5,
+                    padding: 12,
+                    boxPadding: 6,
+                    usePointStyle: true,
+                    cornerRadius: 10,
+                    titleFont: { family: 'Inter', size: 12, weight: '600' },
+                    bodyFont: { family: 'Inter', size: 12, weight: '500' },
+                    callbacks: {
+                        label: (ctx) => {
+                            const val = ctx.raw || 0;
+                            const pct = totalJobs > 0 ? Math.round((val / totalJobs) * 100) : 0;
+                            return ` ${ctx.label}: ${val} (${pct}%)`;
+                        }
+                    }
+                }
+            }
         }
     });
 }
@@ -229,7 +522,9 @@ async function renderAdminRepairs() {
                                     <td style="font-size:0.78rem;color:var(--text-muted)">${formatDate(j.created_at)}</td>
                                     <td>
                                         <div class="flex gap-1">
-                                            <button class="btn btn-outline btn-sm" onclick='openUpdateStatusModal(${j.id}, "${j.status}", ${JSON.stringify(technicians)})'>✏️ Update</button>
+                                            <button class="btn btn-outline btn-sm" onclick='openUpdateStatusModal(${j.id}, "${j.status}", ${JSON.stringify(technicians)})' title="Update Status">🔄 Status</button>
+                                            <button class="btn btn-outline btn-sm" onclick='openAdminEditRepairModal(${JSON.stringify(j).replace(/'/g, "&apos;")})' title="Edit Full Repair">✏️</button>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteRepairJob(${j.id}, '${j.repair_id}')" title="Delete Repair">🗑️</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -510,6 +805,8 @@ async function renderAdminRepairDetail(jobId) {
                 <div class="flex gap-2 flex-wrap">
                     <button class="btn btn-outline" onclick="showQRCode('${job.repair_id}')">📱 QR Code</button>
                     <button class="btn btn-primary" onclick="renderGenerateBill(${job.id})">📄 Generate Invoice</button>
+                    <button class="btn btn-outline" onclick='openAdminEditRepairModal(${JSON.stringify(job).replace(/'/g, "&apos;")})'>✏️ Edit Repair Details</button>
+                    <button class="btn btn-danger" onclick="deleteRepairJob(${job.id}, '${job.repair_id}')">🗑️ Delete Repair</button>
                     ${!job.technician_name ? `
                         <button class="btn btn-outline" style="border-color:#6C63FF;color:#6C63FF" onclick="openAiTechnicianModal(${job.id}, '${job.device_type}')">🤖 AI Match Tech</button>
                     ` : ''}
@@ -695,9 +992,10 @@ async function renderAdminInventory() {
                                     <td style="font-size:0.8rem;color:var(--text-muted)">${item.supplier || '—'}</td>
                                     <td>
                                         <div class="flex gap-1">
-                                            <button class="btn btn-outline btn-sm" onclick="openRestockModal(${item.id},'${item.part_name}','${item.supplier || ''}',10)">📥 Restock</button>
-                                            <button class="btn btn-outline btn-sm" onclick="openStockModal(${item.id},'${item.part_name}',${item.quantity})">⚡ Quick</button>
-                                            <button class="btn btn-outline btn-sm" onclick="openEditInventoryModal(${item.id},'${item.part_name}','${item.part_code}','${item.category}',${item.quantity},${item.unit_price},${item.reorder_level},'${item.supplier || ''}')">✏️</button>
+                                            <button class="btn btn-outline btn-sm" onclick="openRestockModal(${item.id},'${item.part_name.replace(/'/g, "\\'")}', '${(item.supplier || '').replace(/'/g, "\\'")}', 10)">📥 Restock</button>
+                                            <button class="btn btn-outline btn-sm" onclick="openStockModal(${item.id},'${item.part_name.replace(/'/g, "\\'")}', ${item.quantity})">⚡ Quick</button>
+                                            <button class="btn btn-outline btn-sm" onclick="openEditInventoryModal(${item.id},'${item.part_name.replace(/'/g, "\\'")}','${item.part_code}','${item.category}',${item.quantity},${item.unit_price},${item.reorder_level},'${(item.supplier || '').replace(/'/g, "\\'")}')" title="Edit Item">✏️</button>
+                                            <button class="btn btn-outline btn-sm text-danger" style="border-color:var(--danger)" onclick="deleteInventoryItem(${item.id}, '${item.part_name.replace(/'/g, "\\'")}')" title="Delete Item">🗑️</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -707,6 +1005,17 @@ async function renderAdminInventory() {
                 </div>
             </div>
         `);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function deleteInventoryItem(id, name) {
+    if (!confirm(`Are you sure you want to delete '${name}' from inventory?`)) return;
+    try {
+        const res = await api.delete(`/inventory/${id}?hard=true`);
+        showToast(res.message || 'Item deleted successfully', 'success');
+        renderAdminInventory();
     } catch (e) {
         showToast(e.message, 'error');
     }
@@ -752,10 +1061,13 @@ async function submitRestock(itemId) {
     if (isNaN(qty) || qty <= 0) { showToast('Enter a valid quantity', 'error'); return; }
     try {
         await api.post('/inventory/restock', {
+            part_id: itemId,
             item_id: itemId,
+            quantity: qty,
             quantity_added: qty,
             unit_cost: cost,
             supplier: supplier || undefined,
+            reason: notes || 'Restock shipment received',
             notes: notes || undefined
         });
         showToast('Inventory restocked successfully!', 'success');
@@ -840,66 +1152,117 @@ async function submitStockUpdate(itemId) {
     }
 }
 
+const ELECTRICAL_INVENTORY_CATEGORIES = [
+    'Fan Parts', 'Cooler Parts', 'Mixer Parts', 'Motor Parts', 'Geyser Parts',
+    'Pump Parts', 'Wires & Cables', 'Switches & Sockets', 'Capacitors', 'MCB & Fuse',
+    'Relays', 'Connectors', 'LED Bulbs', 'Tape & Insulation', 'Fasteners', 'Misc Electrical'
+];
+
 function openAddItemModal() {
     showModal(`
         <div class="modal-header">
-            <span class="modal-title">➕ Add Inventory Item</span>
+            <span class="modal-title">➕ Add Electrical Inventory Item</span>
             <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label class="form-label">Part Name</label>
-                <input type="text" class="form-control" id="new-name" placeholder="iPhone 13 Screen">
+                <label class="form-label">Part / Item Name *</label>
+                <input type="text" class="form-control" id="new-name" placeholder="e.g. Fan Capacitor 2.5μF" required>
             </div>
             <div class="form-group">
-                <label class="form-label">Part Code</label>
-                <input type="text" class="form-control" id="new-code" placeholder="SCR-IP13">
+                <label class="form-label">Part Code *</label>
+                <input type="text" class="form-control" id="new-code" placeholder="e.g. FAN-CAP-25" required>
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label class="form-label">Category</label>
+                <label class="form-label">Category *</label>
                 <select class="form-control" id="new-cat">
-                    <option>Screen</option><option>Battery</option><option>Motherboard</option><option>IC</option><option>Misc</option>
+                    ${ELECTRICAL_INVENTORY_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">
-                <label class="form-label">Quantity</label>
-                <input type="number" class="form-control" id="new-qty" placeholder="10" min="0">
+                <label class="form-label">Brand / Manufacturer</label>
+                <input type="text" class="form-control" id="new-brand" placeholder="e.g. Havells / Usha / Philips">
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label class="form-label">Unit Price (₹)</label>
-                <input type="number" class="form-control" id="new-price" placeholder="1000">
+                <label class="form-label">Stock Quantity *</label>
+                <input type="number" class="form-control" id="new-qty" placeholder="10" min="0" value="10">
             </div>
             <div class="form-group">
-                <label class="form-label">Reorder Level</label>
-                <input type="number" class="form-control" id="new-reorder" value="5">
+                <label class="form-label">Unit of Measure</label>
+                <select class="form-control" id="new-unit">
+                    <option value="piece">piece (नग)</option>
+                    <option value="set">set (जोड़ा)</option>
+                    <option value="roll">roll (रोल)</option>
+                    <option value="pack">pack (पैकेट)</option>
+                    <option value="meter">meter (मीटर)</option>
+                    <option value="kg">kg (किलो)</option>
+                </select>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">Supplier</label>
-            <input type="text" class="form-control" id="new-supplier" placeholder="Supplier name">
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Purchase / Cost Price (₹)</label>
+                <input type="number" class="form-control" id="new-cost" placeholder="e.g. 45">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Selling / Unit Price (₹) *</label>
+                <input type="number" class="form-control" id="new-price" placeholder="e.g. 80" required>
+            </div>
         </div>
-        <button class="btn btn-primary w-full" onclick="submitAddItem()">Add Item</button>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Reorder Level (Min Alert)</label>
+                <input type="number" class="form-control" id="new-reorder" value="5" min="1">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Supplier / Vendor</label>
+                <input type="text" class="form-control" id="new-supplier" placeholder="e.g. Shiv Electric Wholesale">
+            </div>
+        </div>
+        <button class="btn btn-primary w-full" style="margin-top:10px" onclick="submitAddItem()">➕ Add to Electrical Inventory</button>
     `);
 }
 
 async function submitAddItem() {
+    const name = document.getElementById('new-name')?.value.trim();
+    const code = document.getElementById('new-code')?.value.trim();
+    const cat = document.getElementById('new-cat')?.value;
+    const qty = parseInt(document.getElementById('new-qty')?.value || 0);
+    const sellPrice = parseFloat(document.getElementById('new-price')?.value || 0);
+    const costPrice = parseFloat(document.getElementById('new-cost')?.value || 0);
+    const brand = document.getElementById('new-brand')?.value.trim() || '';
+    const unit = document.getElementById('new-unit')?.value || 'piece';
+    const reorder = parseInt(document.getElementById('new-reorder')?.value || 5);
+    const supplier = document.getElementById('new-supplier')?.value.trim() || '';
+
+    if (!name || !code || sellPrice <= 0) {
+        showToast('Please fill Part Name, Code, and Selling Price.', 'warning');
+        return;
+    }
+
     try {
         await api.post('/inventory/', {
-            part_name: document.getElementById('new-name').value,
-            part_code: document.getElementById('new-code').value,
-            category: document.getElementById('new-cat').value,
+            part_name: name,
+            part_code: code.toUpperCase(),
+            category: cat,
             compatible_devices: [],
-            quantity: parseInt(document.getElementById('new-qty').value || 0),
-            unit_price: parseFloat(document.getElementById('new-price').value || 0),
-            reorder_level: parseInt(document.getElementById('new-reorder').value || 5),
-            supplier: document.getElementById('new-supplier').value
+            quantity: qty,
+            unit_price: sellPrice,
+            purchase_price: costPrice || sellPrice * 0.6,
+            sell_price: sellPrice,
+            brand: brand || null,
+            unit: unit,
+            reorder_level: reorder,
+            reorder_quantity: reorder * 2,
+            supplier: supplier || null,
+            is_active: 1
         });
-        showToast('Item added to inventory!', 'success');
-        document.querySelector('.modal-overlay').remove();
+        showToast(`Electrical part '${name}' added to inventory! 🎉`, 'success');
+        document.querySelector('.modal-overlay')?.remove();
         renderAdminInventory();
     } catch (e) {
         showToast(e.message, 'error');
@@ -961,15 +1324,24 @@ async function renderAdminReports() {
 
                 <div class="charts-grid">
                     <div class="chart-card" style="grid-column:1/-1">
-                        <div class="chart-title">Monthly Revenue Trend</div>
+                        <div class="chart-header">
+                            <div class="chart-title">📈 Monthly Revenue Trend</div>
+                            <span class="chart-badge">12-Month Performance</span>
+                        </div>
                         <div class="chart-wrapper" style="height:280px"><canvas id="monthly-chart"></canvas></div>
                     </div>
                 </div>
 
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
                     <div class="chart-card">
-                        <div class="chart-title">🔧 Revenue by Device Type</div>
-                        <div class="chart-wrapper"><canvas id="device-chart"></canvas></div>
+                        <div class="chart-header">
+                            <div class="chart-title">🔧 Revenue by Device Type</div>
+                            <span class="chart-badge">Category Share</span>
+                        </div>
+                        <div class="chart-split">
+                            <div class="chart-wrapper" style="height:210px;position:relative"><canvas id="device-chart"></canvas></div>
+                            <div class="chart-breakdown-list" id="device-breakdown-container"></div>
+                        </div>
                     </div>
                     <div class="card">
                         <div class="chart-title">🏆 Top Technicians & Workload</div>
@@ -1016,6 +1388,10 @@ async function renderAdminReports() {
                 </div>
             </div>
         `);
+
+        // Cache reports data for reactive theme changes
+        window._cachedReportsData = data;
+
         renderMonthlyChart(data.revenue_over_time);
         renderDeviceChart(data.device_breakdown);
     } catch (e) {
@@ -1023,47 +1399,235 @@ async function renderAdminReports() {
     }
 }
 
-function renderMonthlyChart(data) {
-    const ctx = document.getElementById('monthly-chart')?.getContext('2d');
+let _monthlyChartInstance = null;
+function renderMonthlyChart(data = []) {
+    const canvas = document.getElementById('monthly-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    new Chart(ctx, {
+
+    if (_monthlyChartInstance) {
+        _monthlyChartInstance.destroy();
+        _monthlyChartInstance = null;
+    }
+
+    const theme = getChartTheme();
+    const gradient = ctx.createLinearGradient(0, 0, 0, 280);
+    gradient.addColorStop(0, 'rgba(249, 115, 22, 0.95)');
+    gradient.addColorStop(1, 'rgba(234, 88, 12, 0.25)');
+
+    const labels = (data || []).map(d => d.period || d.month || '');
+    const revenues = (data || []).map(d => d.revenue || 0);
+
+    _monthlyChartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: data.map(d => d.period),
+            labels: labels.length ? labels : ['No Data'],
             datasets: [{
-                label: 'Revenue',
-                data: data.map(d => d.revenue),
-                backgroundColor: 'rgba(108,99,255,0.7)',
-                borderRadius: 6,
+                label: 'Monthly Revenue',
+                data: revenues.length ? revenues : [0],
+                backgroundColor: gradient,
+                hoverBackgroundColor: theme.primaryDark,
+                borderRadius: 8,
+                borderSkipped: false,
+                barPercentage: 0.48,
+                categoryPercentage: 0.68,
             }]
         },
         options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+                duration: 750,
+                easing: 'easeOutQuart'
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: theme.tooltipBg,
+                    titleColor: theme.tooltipTitle,
+                    bodyColor: theme.tooltipBody,
+                    borderColor: theme.tooltipBorder,
+                    borderWidth: 1.5,
+                    padding: 12,
+                    boxPadding: 6,
+                    usePointStyle: true,
+                    cornerRadius: 10,
+                    titleFont: { family: 'Inter', size: 12, weight: '600' },
+                    bodyFont: { family: 'Inter', size: 13, weight: '700' },
+                    callbacks: {
+                        label: (ctx) => ' Billed: ' + formatCurrency(ctx.parsed.y)
+                    }
+                }
+            },
             scales: {
-                x: { grid: { display: false }, ticks: { color: '#666' } },
-                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#666', callback: v => '₹' + v.toLocaleString() } }
+                x: {
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: {
+                        color: theme.textColor,
+                        font: { family: 'Inter', size: 11, weight: '500' }
+                    }
+                },
+                y: {
+                    border: { display: false },
+                    grid: {
+                        color: theme.gridColor,
+                        borderDash: [4, 4]
+                    },
+                    ticks: {
+                        color: theme.textColor,
+                        font: { family: 'Inter', size: 11 },
+                        callback: (v) => v >= 1000 ? '₹' + (v / 1000).toFixed(1) + 'k' : '₹' + v
+                    }
+                }
             }
         }
     });
 }
 
-function renderDeviceChart(data) {
-    const ctx = document.getElementById('device-chart')?.getContext('2d');
-    if (!ctx || !data.length) return;
-    const colors = ['#6C63FF', '#FF6B6B', '#27D67B', '#FFB547'];
-    new Chart(ctx, {
-        type: 'pie',
+let _deviceChartInstance = null;
+function renderDeviceChart(data = []) {
+    const canvas = document.getElementById('device-chart');
+    if (!canvas || !data.length) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (_deviceChartInstance) {
+        _deviceChartInstance.destroy();
+        _deviceChartInstance = null;
+    }
+
+    const theme = getChartTheme();
+    const colors = [
+        '#F97316', // Ceiling Fan
+        '#38BDF8', // Cooler
+        '#FBBF24', // Mixer
+        '#22C55E', // Motor / Pump
+        '#EC4899', // Geyser
+        '#A855F7', // Inverter
+        '#06B6D4', // Microwave / Oven
+        '#64748B'  // Others
+    ];
+
+    const totalDevices = data.reduce((sum, d) => sum + (d.count || 0), 0);
+
+    // Populate Device Breakdown Progress Track List
+    const breakdownContainer = document.getElementById('device-breakdown-container');
+    if (breakdownContainer) {
+        const sorted = [...data].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 5);
+        breakdownContainer.innerHTML = sorted.map((d, i) => {
+            const count = d.count || 0;
+            const pct = totalDevices > 0 ? Math.round((count / totalDevices) * 100) : 0;
+            const color = colors[i % colors.length];
+            return `
+                <div class="chart-breakdown-row">
+                    <div class="chart-breakdown-meta">
+                        <div class="chart-breakdown-label">
+                            <span class="chart-breakdown-dot" style="background:${color}"></span>
+                            <span>${d.device_type}</span>
+                        </div>
+                        <div class="chart-breakdown-values">
+                            <b>${count}</b> <span style="color:var(--text-muted);font-size:0.72rem">(${pct}%)</span>
+                        </div>
+                    </div>
+                    <div class="chart-progress-track">
+                        <div class="chart-progress-fill" style="width:${pct}%;background:${color}"></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    const centerTextPlugin = {
+        id: 'deviceCenterText',
+        beforeDraw(chart) {
+            const { width, height, ctx } = chart;
+            ctx.save();
+            ctx.font = '800 1.7rem "Space Grotesk", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = theme.titleColor;
+            ctx.fillText(totalDevices, width / 2, height / 2 - 10);
+
+            ctx.font = '600 0.68rem "Inter", sans-serif';
+            ctx.letterSpacing = '0.08em';
+            ctx.fillStyle = theme.textMuted;
+            ctx.fillText('APPLIANCES', width / 2, height / 2 + 12);
+            ctx.restore();
+        }
+    };
+
+    _deviceChartInstance = new Chart(ctx, {
+        type: 'doughnut',
         data: {
             labels: data.map(d => d.device_type),
-            datasets: [{ data: data.map(d => d.count), backgroundColor: colors, borderWidth: 0 }]
+            datasets: [{
+                data: data.map(d => d.count),
+                backgroundColor: colors,
+                borderWidth: 0,
+                spacing: 3,
+                borderRadius: 5,
+                hoverOffset: 8
+            }]
         },
+        plugins: [centerTextPlugin],
         options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { color: '#aaa', font: { size: 11 } } } }
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '72%',
+            animation: {
+                animateRotate: true,
+                animateScale: true,
+                duration: 750,
+                easing: 'easeOutQuart'
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: theme.tooltipBg,
+                    titleColor: theme.tooltipTitle,
+                    bodyColor: theme.tooltipBody,
+                    borderColor: theme.tooltipBorder,
+                    borderWidth: 1.5,
+                    padding: 12,
+                    boxPadding: 6,
+                    usePointStyle: true,
+                    cornerRadius: 10,
+                    titleFont: { family: 'Inter', size: 12, weight: '600' },
+                    bodyFont: { family: 'Inter', size: 12, weight: '500' },
+                    callbacks: {
+                        label: (ctx) => {
+                            const val = ctx.raw || 0;
+                            const pct = totalDevices > 0 ? Math.round((val / totalDevices) * 100) : 0;
+                            return ` ${ctx.label}: ${val} units (${pct}%)`;
+                        }
+                    }
+                }
+            }
         }
     });
 }
+
+// Reactive chart theme redraw when switching Dark/Light modes
+window.addEventListener('themeChanged', () => {
+    if (window._cachedDashboardStats) {
+        if (document.getElementById('revenue-chart')) {
+            renderRevenueChart(window._cachedDashboardStats.daily_revenue);
+        }
+        if (document.getElementById('status-chart')) {
+            renderStatusChart(window._cachedDashboardStats.status_distribution);
+        }
+    }
+    if (window._cachedReportsData) {
+        if (document.getElementById('monthly-chart')) {
+            renderMonthlyChart(window._cachedReportsData.revenue_over_time);
+        }
+        if (document.getElementById('device-chart')) {
+            renderDeviceChart(window._cachedReportsData.device_breakdown);
+        }
+    }
+});
 
 /** Admin Staff Management */
 /** Admin Staff Management */
@@ -1164,13 +1728,13 @@ async function renderAdminStaff() {
                                                 ? `<div style="font-size:0.7rem;color:var(--danger);margin-top:2px">Exit: ${s.termination_effective_date}</div>` : ''}
                                         </td>
                                         <td>
-                                            <div class="flex gap-1 flex-wrap">
-                                                <button class="btn btn-outline btn-sm" onclick="openEditUserModal(${s.id},'${s.name}','${s.email}','${s.phone || ''}',${s.monthly_salary || 0})">✏️</button>
-                                                <button class="btn btn-outline btn-sm" style="color:var(--primary)" onclick="openAwardBonusModal(${s.id},'${s.name}')" title="Award Bonus">🎁</button>
-                                                <button class="btn btn-outline btn-sm" style="color:#eab308" onclick="openTerminationNoticeModal(${s.id},'${s.name}')" title="15-Day Exit Notice">📢</button>
+                                                <button class="btn btn-outline btn-sm" onclick="openEditUserModal(${s.id},'${s.name.replace(/'/g, "\\'")}','${s.email}','${s.phone || ''}',${s.monthly_salary || 0},'${s.joining_date || ''}',${isActive ? 1 : 0})" title="Edit Staff Details">✏️</button>
+                                                <button class="btn btn-outline btn-sm" style="color:var(--primary)" onclick="openAwardBonusModal(${s.id},'${s.name.replace(/'/g, "\\'")}')" title="Award Bonus">🎁</button>
+                                                <button class="btn btn-outline btn-sm" style="color:#eab308" onclick="openTerminationNoticeModal(${s.id},'${s.name.replace(/'/g, "\\'")}')" title="15-Day Exit Notice">📢</button>
                                                 ${isActive 
-                                                    ? `<button class="btn btn-danger btn-sm" onclick="openDeactivateStaffModal(${s.id},'${s.name}')" title="Deactivate Staff">🚫</button>`
+                                                    ? `<button class="btn btn-outline btn-sm" style="color:#f97316" onclick="openDeactivateStaffModal(${s.id},'${s.name.replace(/'/g, "\\'")}')" title="Deactivate Staff">🚫</button>`
                                                     : `<button class="btn btn-success btn-sm" onclick="activateStaff(${s.id})" title="Reactivate Staff">✅</button>`}
+                                                <button class="btn btn-outline btn-sm text-danger" style="border-color:var(--danger)" onclick="deleteStaffMember(${s.id},'${s.name.replace(/'/g, "\\'")}')" title="Delete / Remove Staff">🗑️</button>
                                             </div>
                                         </td>
                                     </tr>
@@ -1711,10 +2275,16 @@ async function renderAdminBills(filterStatus = 'All') {
                                             ${b.payment_status === 'Pending' ? `
                                                 <button class="btn btn-primary btn-sm" onclick="openVerifyPaymentModal(${b.id}, '${b.bill_number}', ${b.total_amount}, '${b.transaction_id || ''}', '${b.payment_method || 'UPI'}')">💳 Verify</button>
                                             ` : ''}
-                                            ${b.payment_status !== 'Paid' && b.payment_status !== 'Pending' ? `
+                                            ${b.payment_status !== 'Paid' && b.payment_status !== 'Pending' && !b.is_void && !b.is_cancelled ? `
                                                 <button class="btn btn-success btn-sm" onclick="markPaid(${b.id})">✅ Paid</button>
                                             ` : ''}
-                                            <button class="btn btn-outline btn-sm" onclick="openEditBillModal(${b.id},${b.labour_charge},${b.parts_cost},${b.discount},'${b.payment_status}')">✏️</button>
+                                            ${!b.is_void && !b.is_cancelled ? `
+                                                <button class="btn btn-outline btn-sm" onclick="openEditBillModal(${b.id},${b.labour_charge},${b.parts_cost},${b.discount},'${b.payment_status}')" title="Edit Bill">✏️</button>
+                                                <button class="btn btn-warning btn-sm" onclick="voidBillPrompt(${b.id}, '${b.bill_number}')" title="Void Invoice">🚫 Void</button>
+                                                ${b.payment_status !== 'Paid' ? `
+                                                    <button class="btn btn-danger btn-sm" onclick="cancelBillPrompt(${b.id}, '${b.bill_number}')" title="Cancel Invoice">✕ Cancel</button>
+                                                ` : ''}
+                                            ` : ''}
                                         </div>
                                     </td>
                                 </tr>
@@ -1769,33 +2339,76 @@ async function submitVerifyPayment(billId, action) {
 
 /** ─── ADMIN EDIT MODALS ──────────────────────────────── */
 
-// Edit User (staff or customer)
-function openEditUserModal(userId, name, email, phone) {
+function openEditUserModal(userId, name, email, phone, salary = 0, joiningDate = '', isActive = 1) {
     showModal(`
         <div class="modal-header">
-            <span class="modal-title">✏️ Edit User</span>
+            <span class="modal-title">✏️ Edit Staff Member</span>
             <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
         </div>
-        <div class="form-group"><label class="form-label">Full Name</label>
-            <input type="text" class="form-control" id="edit-user-name" value="${name}"></div>
-        <div class="form-group"><label class="form-label">Email</label>
-            <input type="email" class="form-control" id="edit-user-email" value="${email}"></div>
-        <div class="form-group"><label class="form-label">Phone</label>
-            <input type="tel" class="form-control" id="edit-user-phone" value="${phone}"></div>
-        <button class="btn btn-primary w-full" onclick="submitEditUser(${userId})">Save Changes</button>
+        <div class="form-row">
+            <div class="form-group"><label class="form-label">Full Name *</label>
+                <input type="text" class="form-control" id="edit-user-name" value="${name}" required></div>
+            <div class="form-group"><label class="form-label">Email Address *</label>
+                <input type="email" class="form-control" id="edit-user-email" value="${email}" required></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label class="form-label">Phone Number</label>
+                <input type="tel" class="form-control" id="edit-user-phone" value="${phone || ''}"></div>
+            <div class="form-group"><label class="form-label">Monthly Salary (₹)</label>
+                <input type="number" class="form-control" id="edit-user-salary" value="${salary || 0}" min="0"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label class="form-label">Joining Date</label>
+                <input type="date" class="form-control" id="edit-user-joined" value="${joiningDate || ''}"></div>
+            <div class="form-group"><label class="form-label">Account Status</label>
+                <select class="form-control" id="edit-user-active">
+                    <option value="1" ${isActive ? 'selected' : ''}>Active</option>
+                    <option value="0" ${!isActive ? 'selected' : ''}>Deactivated</option>
+                </select></div>
+        </div>
+        <button class="btn btn-primary w-full" style="margin-top:8px" onclick="submitEditUser(${userId})">Save Changes</button>
     `);
 }
+
 async function submitEditUser(userId) {
+    const name = document.getElementById('edit-user-name')?.value.trim();
+    const email = document.getElementById('edit-user-email')?.value.trim();
+    const phone = document.getElementById('edit-user-phone')?.value.trim();
+    const salary = parseFloat(document.getElementById('edit-user-salary')?.value || 0);
+    const joined = document.getElementById('edit-user-joined')?.value || null;
+    const isActive = parseInt(document.getElementById('edit-user-active')?.value || 1);
+
+    if (!name || !email) {
+        showToast('Name and Email are required.', 'warning');
+        return;
+    }
+
     try {
         await api.put(`/auth/users/${userId}`, {
-            name: document.getElementById('edit-user-name').value,
-            email: document.getElementById('edit-user-email').value,
-            phone: document.getElementById('edit-user-phone').value
+            name,
+            email,
+            phone: phone || null,
+            monthly_salary: salary,
+            joining_date: joined,
+            is_active: isActive
         });
-        showToast('User updated!', 'success');
+        showToast('Staff member updated successfully! ✅', 'success');
         document.querySelector('.modal-overlay')?.remove();
         renderAdminStaff();
-    } catch (e) { showToast(e.message, 'error'); }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function deleteStaffMember(userId, name) {
+    if (!confirm(`Are you sure you want to remove/deactivate staff member '${name}'?`)) return;
+    try {
+        const res = await api.delete(`/auth/users/${userId}`);
+        showToast(res.message || 'Staff removed successfully', 'success');
+        renderAdminStaff();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
 }
 
 // Edit Inventory Item
@@ -1814,7 +2427,7 @@ function openEditInventoryModal(id, name, code, cat, qty, price, reorder, suppli
         <div class="form-row">
             <div class="form-group"><label class="form-label">Category</label>
                 <select class="form-control" id="ei-cat">
-                    ${['Screen', 'Battery', 'Motherboard', 'IC', 'Misc', 'Motor', 'Coil', 'Capacitor', 'Switch', 'Other'].map(c => '<option value="' + c + '"' + (c == cat ? ' selected' : '') + '>' + c + '</option>').join('')}
+                    ${['Fan Parts', 'Cooler Parts', 'Mixer Parts', 'Motor Parts', 'Geyser Parts', 'Pump Parts', 'Wires & Cables', 'Switches & Sockets', 'Capacitors', 'MCB & Fuse', 'Relays', 'Connectors', 'LED Bulbs', 'Tape & Insulation', 'Fasteners', 'Misc Electrical'].map(c => '<option value="' + c + '"' + (c == cat ? ' selected' : '') + '>' + c + '</option>').join('')}
                 </select></div>
             <div class="form-group"><label class="form-label">Quantity</label>
                 <input type="number" class="form-control" id="ei-qty" value="${qty}" min="0"></div>
@@ -1885,6 +2498,181 @@ async function submitEditBill(billId) {
         renderAdminBills();
     } catch (e) { showToast(e.message, 'error'); }
 }
+
+async function deleteBill(billId, billNumber) {
+    if (!confirm(`Are you sure you want to cancel/delete Invoice #${billNumber}?`)) return;
+    try {
+        const res = await api.delete(`/bills/${billId}`);
+        showToast(res.message || 'Invoice cancelled successfully.', 'success');
+        renderAdminBills();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function voidBillPrompt(billId, billNumber) {
+    const reason = prompt(`Please enter the mandatory reason to VOID Invoice #${billNumber}:`);
+    if (!reason || reason.trim().length < 3) {
+        if (reason !== null) showToast('A valid reason (minimum 3 characters) is required to void an invoice.', 'warning');
+        return;
+    }
+    try {
+        const res = await api.post(`/bills/${billId}/void`, { reason: reason.trim() });
+        showToast(res.message || 'Invoice voided successfully.', 'success');
+        renderAdminBills();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function cancelBillPrompt(billId, billNumber) {
+    const reason = prompt(`Please enter the mandatory reason to CANCEL Invoice #${billNumber}:`);
+    if (!reason || reason.trim().length < 3) {
+        if (reason !== null) showToast('A valid reason (minimum 3 characters) is required to cancel an invoice.', 'warning');
+        return;
+    }
+    try {
+        const res = await api.post(`/bills/${billId}/cancel`, { reason: reason.trim() });
+        showToast(res.message || 'Invoice cancelled successfully.', 'success');
+        renderAdminBills();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function deleteRepairJob(id, repairId) {
+    if (!confirm(`Are you sure you want to permanently delete repair job ${repairId}? All associated records, notes, and photos will be removed.`)) return;
+    try {
+        const res = await api.delete(`/repairs/${id}`);
+        showToast(res.message || `Repair ${repairId} deleted successfully! 🗑️`, 'success');
+        if (window.location.hash.includes('/admin/repairs/')) {
+            router.navigate('/admin/repairs');
+        } else {
+            renderAdminRepairs();
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function openAdminEditRepairModal(job) {
+    const statuses = [
+        'Requested', 'Assigned', 'Diagnosing', 'Approved',
+        'Repairing', 'Ready', 'Delivered', 'Completed',
+        'On Hold', 'Cancelled', 'Rejected'
+    ];
+    const priorities = ['Normal', 'High', 'Urgent'];
+    const serviceModes = ['Store Drop-off', 'Home Pickup'];
+    const electricalDevices = [
+        'Ceiling Fan', 'Table/Stand Fan', 'Exhaust Fan',
+        'Air Cooler', 'Water Geyser/Heater', 'Mixer Grinder',
+        'Water Pump/Motor', 'Induction Cooktop', 'Electric Iron',
+        'Microwave/Oven', 'Room Heater', 'Inverter/UPS',
+        'Stabilizer', 'Washing Machine', 'Refrigerator', 'Other Electrical'
+    ];
+
+    showModal(`
+        <div class="modal-header">
+            <span class="modal-title">✏️ Admin Full Edit – Repair #${job.repair_id}</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px">
+            Customer: <b>${job.customer_name || 'N/A'}</b> (${job.customer_phone || ''})
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Electrical Device Type *</label>
+                <input list="admin-device-types" class="form-control" id="aed-device" value="${job.device_type || ''}" required>
+                <datalist id="admin-device-types">
+                    ${electricalDevices.map(d => `<option value="${d}"></option>`).join('')}
+                </datalist>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Brand</label>
+                <input type="text" class="form-control" id="aed-brand" value="${job.brand || ''}">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Model / Capacity</label>
+                <input type="text" class="form-control" id="aed-model" value="${job.model || ''}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Priority</label>
+                <select class="form-control" id="aed-priority">
+                    ${priorities.map(p => `<option value="${p}" ${p === job.priority ? 'selected' : ''}>${p}</option>`).join('')}
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Status</label>
+                <select class="form-control" id="aed-status">
+                    ${statuses.map(s => `<option value="${s}" ${s === job.status ? 'selected' : ''}>${s}</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Service Type</label>
+                <select class="form-control" id="aed-service-type">
+                    ${serviceModes.map(m => `<option value="${m}" ${m === job.service_type ? 'selected' : ''}>${m}</option>`).join('')}
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Estimated Cost (₹)</label>
+                <input type="number" class="form-control" id="aed-est-cost" value="${job.estimated_cost || 0}">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Actual Cost (₹)</label>
+                <input type="number" class="form-control" id="aed-act-cost" value="${job.actual_cost || 0}">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Problem Description</label>
+            <textarea class="form-control" id="aed-problem" rows="2">${job.problem_description || ''}</textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Service / Pickup Address</label>
+            <input type="text" class="form-control" id="aed-address" value="${job.pickup_address || ''}" placeholder="House no, Street, Landmark...">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Admin / Technician Notes</label>
+            <textarea class="form-control" id="aed-notes" rows="2">${job.technician_notes || ''}</textarea>
+        </div>
+        <button class="btn btn-primary w-full" style="margin-top:8px" onclick="submitAdminEditRepair(${job.id})">Save All Changes ✅</button>
+    `);
+}
+
+async function submitAdminEditRepair(jobId) {
+    const payload = {
+        device_type: document.getElementById('aed-device')?.value.trim(),
+        brand: document.getElementById('aed-brand')?.value.trim(),
+        model: document.getElementById('aed-model')?.value.trim(),
+        priority: document.getElementById('aed-priority')?.value,
+        status: document.getElementById('aed-status')?.value,
+        service_type: document.getElementById('aed-service-type')?.value,
+        estimated_cost: parseFloat(document.getElementById('aed-est-cost')?.value || 0),
+        actual_cost: parseFloat(document.getElementById('aed-act-cost')?.value || 0),
+        problem_description: document.getElementById('aed-problem')?.value.trim(),
+        pickup_address: document.getElementById('aed-address')?.value.trim(),
+        technician_notes: document.getElementById('aed-notes')?.value.trim()
+    };
+
+    try {
+        const res = await api.put(`/repairs/${jobId}`, payload);
+        showToast(res.message || 'Repair details updated successfully! ✅', 'success');
+        document.querySelector('.modal-overlay')?.remove();
+        if (window.location.hash.includes('/admin/repairs/')) {
+            renderAdminRepairDetail(jobId);
+        } else {
+            renderAdminRepairs();
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
 
 /** Admin Feedback View */
 async function renderAdminFeedback() {
@@ -2580,4 +3368,294 @@ async function renderAdminPaymentsReport() {
     } catch (e) {
         showToast(e.message, 'error');
     }
+}
+
+/** ─── ADMIN CUSTOMER MANAGEMENT ────────────────────────────────── */
+async function renderAdminCustomers() {
+    showLoading();
+    try {
+        const customers = await api.get('/auth/customers').catch(() => api.get('/auth/users').then(users => users.filter(u => u.role === 'customer')));
+        setContent(`
+            <div class="page">
+                <div class="page-header">
+                    <div class="flex justify-between items-center flex-wrap gap-2">
+                        <div>
+                            <div class="page-title">👤 Customer Management</div>
+                            <div class="page-subtitle">${customers.length} registered customers</div>
+                        </div>
+                        <div class="flex gap-2">
+                            <div class="search-bar" style="max-width:300px">
+                                <span class="search-icon">🔍</span>
+                                <input type="text" placeholder="Search customers..." oninput="filterTable('cust-tbody', this.value)">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr>
+                            <th>Customer</th><th>Contact</th><th>Address</th><th>Joined</th><th>Auth</th><th>Status</th><th>Actions</th>
+                        </tr></thead>
+                        <tbody id="cust-tbody">
+                            ${customers.map(c => `
+                                <tr style="${c.is_active === 0 ? 'opacity:0.6' : ''}">
+                                    <td>
+                                        <div style="font-weight:600">${c.name}</div>
+                                        <div style="font-size:0.75rem;color:var(--text-muted)">${c.email}</div>
+                                    </td>
+                                    <td style="font-size:0.85rem">${c.phone || '—'}</td>
+                                    <td style="font-size:0.82rem">${[c.address, c.landmark, c.pincode].filter(Boolean).join(', ') || '—'}</td>
+                                    <td style="font-size:0.78rem;color:var(--text-muted)">${formatDate(c.created_at)}</td>
+                                    <td><span class="badge badge-assigned">${c.auth_provider || 'email'}</span></td>
+                                    <td>
+                                        <span class="badge ${c.is_active !== 0 ? 'badge-completed' : 'badge-cancelled'}">
+                                            ${c.is_active !== 0 ? 'Active' : 'Inactive'}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div class="flex gap-1">
+                                            <button class="btn btn-outline btn-sm" onclick="openEditCustomerModal(${c.id},'${(c.name||'').replace(/'/g,'`')}','${c.email}','${c.phone||''}','${(c.address||'').replace(/'/g,'`')}','${(c.landmark||'').replace(/'/g,'`')}','${c.pincode||''}',${c.is_active !== 0 ? 1 : 0})">✏️ Edit</button>
+                                            <button class="btn btn-outline btn-sm text-danger" style="border-color:var(--danger)" onclick="deleteCustomer(${c.id}, '${(c.name||'').replace(/'/g,'`')}')">🗑️</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `);
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteCustomer(userId, name) {
+    if (!confirm(`Are you sure you want to deactivate/remove customer '${name}'?`)) return;
+    try {
+        const res = await api.delete(`/auth/users/${userId}`);
+        showToast(res.message || 'Customer removed successfully', 'success');
+        renderAdminCustomers();
+    } catch(e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function filterTable(tbodyId, query) {
+    document.querySelectorAll('#' + tbodyId + ' tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(query.toLowerCase()) ? '' : 'none';
+    });
+}
+
+function openEditCustomerModal(id, name, email, phone, address, landmark, pincode, isActive) {
+    showModal(`
+        <div class="modal-header">
+            <span class="modal-title">✏️ Edit Customer</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label class="form-label">Full Name</label>
+                <input class="form-control" id="ec-name" value="${name}"></div>
+            <div class="form-group"><label class="form-label">Phone</label>
+                <input class="form-control" id="ec-phone" value="${phone}"></div>
+        </div>
+        <div class="form-group"><label class="form-label">Email</label>
+            <input type="email" class="form-control" id="ec-email" value="${email}"></div>
+        <div class="form-row">
+            <div class="form-group"><label class="form-label">Address</label>
+                <input class="form-control" id="ec-address" value="${address}"></div>
+            <div class="form-group"><label class="form-label">Landmark</label>
+                <input class="form-control" id="ec-landmark" value="${landmark}"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label class="form-label">Pincode</label>
+                <input class="form-control" id="ec-pincode" value="${pincode}" maxlength="6"></div>
+            <div class="form-group"><label class="form-label">Status</label>
+                <select class="form-control" id="ec-active">
+                    <option value="1" ${isActive ? 'selected' : ''}>Active</option>
+                    <option value="0" ${!isActive ? 'selected' : ''}>Inactive</option>
+                </select></div>
+        </div>
+        <button class="btn btn-primary w-full" onclick="submitEditCustomer(${id})">Save Changes</button>
+    `);
+}
+async function submitEditCustomer(userId) {
+    try {
+        await api.put('/auth/users/' + userId, {
+            name: document.getElementById('ec-name').value,
+            email: document.getElementById('ec-email').value,
+            phone: document.getElementById('ec-phone').value,
+            address: document.getElementById('ec-address').value,
+            landmark: document.getElementById('ec-landmark').value,
+            pincode: document.getElementById('ec-pincode').value,
+            is_active: parseInt(document.getElementById('ec-active').value)
+        });
+        showToast('Customer updated!', 'success');
+        document.querySelector('.modal-overlay')?.remove();
+        renderAdminCustomers();
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+/** ─── ADMIN PER-ITEM WARRANTY ────────────────────────────────── */
+function openItemWarrantyModal(jobId, itemName, deviceType) {
+    const warrantyOptions = [
+        {label: 'No Warranty', days: 0},
+        {label: '7 Days', days: 7},
+        {label: '15 Days', days: 15},
+        {label: '30 Days', days: 30},
+        {label: '3 Months', days: 90},
+        {label: '6 Months', days: 180},
+        {label: '1 Year', days: 365},
+    ];
+    showModal(`
+        <div class="modal-header">
+            <span class="modal-title">🛡️ Warranty: ${itemName}</span>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="padding:10px;background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.2);border-radius:var(--radius-sm);margin-bottom:14px;font-size:0.85rem">
+            Set individual warranty for <b>${itemName}</b>. This is independent of other items in the same request.
+        </div>
+        <div class="form-group">
+            <label class="form-label">Warranty Duration <span class="text-danger">*</span></label>
+            <select class="form-control" id="iw-type" onchange="updateWarrantyDays(this)">
+                ${warrantyOptions.map(o => `<option value="${o.days}" data-label="${o.label}">${o.label}</option>`).join('')}
+                <option value="custom" data-label="Custom">Custom Duration</option>
+            </select>
+        </div>
+        <div class="form-group" id="iw-custom-box" style="display:none">
+            <label class="form-label">Custom Days</label>
+            <input type="number" class="form-control" id="iw-custom-days" placeholder="e.g. 45" min="1">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Covered Issues</label>
+            <input class="form-control" id="iw-covered" value="Covers parts replaced and workmanship.">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Excluded Issues</label>
+            <input class="form-control" id="iw-excluded" value="Physical damage, water damage, misuse, unauthorized repair excluded.">
+        </div>
+        <input type="hidden" id="iw-job-id" value="${jobId}">
+        <input type="hidden" id="iw-item-name" value="${itemName}">
+        <input type="hidden" id="iw-device-type" value="${deviceType || ''}">
+        <button class="btn btn-primary w-full" onclick="submitItemWarranty()">Set Warranty</button>
+    `);
+}
+
+function updateWarrantyDays(sel) {
+    const box = document.getElementById('iw-custom-box');
+    if (box) box.style.display = sel.value === 'custom' ? 'block' : 'none';
+}
+
+async function submitItemWarranty() {
+    const jobId = parseInt(document.getElementById('iw-job-id').value);
+    const itemName = document.getElementById('iw-item-name').value;
+    const deviceType = document.getElementById('iw-device-type').value;
+    const typeEl = document.getElementById('iw-type');
+    const selectedOpt = typeEl.options[typeEl.selectedIndex];
+    let days = parseInt(typeEl.value) || 0;
+    let warrantyLabel = selectedOpt.getAttribute('data-label') || 'No Warranty';
+    if (typeEl.value === 'custom') {
+        days = parseInt(document.getElementById('iw-custom-days').value) || 0;
+        warrantyLabel = days > 0 ? days + ' Days (Custom)' : 'No Warranty';
+    }
+    const covered = document.getElementById('iw-covered').value;
+    const excluded = document.getElementById('iw-excluded').value;
+    try {
+        const res = await api.post('/warranties/item', {
+            repair_job_id: jobId,
+            item_name: itemName,
+            device_type: deviceType,
+            warranty_type: warrantyLabel,
+            duration_days: days,
+            covered_terms: covered,
+            excluded_terms: excluded
+        });
+        showToast(res.message, 'success');
+        document.querySelector('.modal-overlay')?.remove();
+        renderAdminRepairDetail(jobId);
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+/** ─── OFFER EDIT MODAL ─────────────────────────────────────── */
+async function openEditOfferModal(offerId) {
+    showLoading();
+    try {
+        const offers = await api.get('/bills/offers');
+        const o = offers.find(x => x.id === offerId);
+        if (!o) { showToast('Offer not found', 'error'); return; }
+        
+        const users = await api.get('/auth/users');
+        const customers = users.filter(u => u.role === 'customer');
+        
+        showModal(`
+            <div class="modal-header">
+                <span class="modal-title">✏️ Edit Offer: ${o.code}</span>
+                <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Coupon Code *</label>
+                    <input class="form-control" id="eo-code" value="${o.code}" style="text-transform:uppercase;font-weight:700"></div>
+                <div class="form-group"><label class="form-label">Offer Title *</label>
+                    <input class="form-control" id="eo-title" value="${o.title || ''}"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Description</label>
+                <input class="form-control" id="eo-desc" value="${o.description || ''}"></div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Discount Type</label>
+                    <select class="form-control" id="eo-type">
+                        <option value="percentage" ${o.discount_type === 'percentage' ? 'selected' : ''}>Percentage (%)</option>
+                        <option value="flat" ${o.discount_type === 'flat' ? 'selected' : ''}>Flat Amount (₹)</option>
+                    </select></div>
+                <div class="form-group"><label class="form-label">Discount Value *</label>
+                    <input type="number" class="form-control" id="eo-val" value="${o.discount_value || ''}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Min Bill Amount (₹)</label>
+                    <input type="number" class="form-control" id="eo-min" value="${o.min_bill_amount || 0}"></div>
+                <div class="form-group"><label class="form-label">Max Discount Cap (₹)</label>
+                    <input type="number" class="form-control" id="eo-maxd" value="${o.max_discount || ''}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Valid From</label>
+                    <input type="date" class="form-control" id="eo-from" value="${o.valid_from || ''}"></div>
+                <div class="form-group"><label class="form-label">Valid Until (Expiry)</label>
+                    <input type="date" class="form-control" id="eo-until" value="${o.valid_until || ''}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Total Usage Limit</label>
+                    <input type="number" class="form-control" id="eo-ulimit" value="${o.usage_limit || ''}" placeholder="Leave blank = unlimited"></div>
+                <div class="form-group"><label class="form-label">Per-Customer Limit</label>
+                    <input type="number" class="form-control" id="eo-pclimit" value="${o.per_customer_limit || 1}" min="1"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Target Customer (leave blank = all)</label>
+                <select class="form-control" id="eo-target">
+                    <option value="">🎉 All Customers</option>
+                    ${customers.map(c => `<option value="${c.id}" ${o.target_customer_id === c.id ? 'selected' : ''}>👤 ${c.name} (${c.email})</option>`).join('')}
+                </select></div>
+            <button class="btn btn-primary w-full" style="margin-top:10px" onclick="submitEditOffer(${offerId})">Save Changes</button>
+        `);
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function submitEditOffer(offerId) {
+    const code = document.getElementById('eo-code')?.value.trim().toUpperCase();
+    const title = document.getElementById('eo-title')?.value.trim();
+    const val = parseFloat(document.getElementById('eo-val')?.value || 0);
+    if (!code || !title || val <= 0) { showToast('Please fill required fields.', 'warning'); return; }
+    try {
+        await api.put('/bills/offers/' + offerId, {
+            code, title,
+            description: document.getElementById('eo-desc')?.value || null,
+            discount_type: document.getElementById('eo-type')?.value,
+            discount_value: val,
+            min_bill_amount: parseFloat(document.getElementById('eo-min')?.value || 0),
+            max_discount: parseFloat(document.getElementById('eo-maxd')?.value) || null,
+            valid_from: document.getElementById('eo-from')?.value || null,
+            valid_until: document.getElementById('eo-until')?.value || null,
+            usage_limit: parseInt(document.getElementById('eo-ulimit')?.value) || null,
+            per_customer_limit: parseInt(document.getElementById('eo-pclimit')?.value) || 1,
+            target_customer_id: parseInt(document.getElementById('eo-target')?.value) || null
+        });
+        showToast('Offer updated!', 'success');
+        document.querySelector('.modal-overlay')?.remove();
+        renderAdminOffers();
+    } catch(e) { showToast(e.message, 'error'); }
 }

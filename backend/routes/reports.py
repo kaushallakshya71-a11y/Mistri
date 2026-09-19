@@ -5,9 +5,11 @@ parts vs. labour profitability, and enterprise audit logs.
 """
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from typing import Optional
 from db.database import get_db
 from middleware.auth import require_role
+from utils.audit import log_audit_event
 from datetime import datetime, timedelta
 import io, csv
 
@@ -263,3 +265,54 @@ def export_csv(type: str = "repairs", current_user: dict = Depends(require_role(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+# ----------------------------------------------------
+# Database Backup & Disaster Recovery Endpoints
+# ----------------------------------------------------
+
+class RestoreBackupRequest(BaseModel):
+    filename: str
+
+@router.post("/backup")
+def trigger_backup(current_user: dict = Depends(require_role("admin"))):
+    """Admin triggers an immediate SQLite online database backup."""
+    from utils.backup import create_database_backup
+    try:
+        res = create_database_backup()
+        log_audit_event(
+            user=current_user,
+            action="DATABASE_BACKUP_CREATED",
+            entity="system",
+            entity_id=0,
+            details={"filename": res["filename"], "size_kb": res["size_kb"]}
+        )
+        return {"message": "Database backup created successfully", "backup": res}
+    except Exception as e:
+        raise HTTPException(500, f"Database backup failed: {str(e)}")
+
+@router.get("/backups")
+def get_backups(current_user: dict = Depends(require_role("admin"))):
+    """Admin lists all database backup snapshots."""
+    from utils.backup import list_database_backups
+    return {"backups": list_database_backups()}
+
+@router.post("/restore")
+def restore_backup(req: RestoreBackupRequest, current_user: dict = Depends(require_role("admin"))):
+    """Admin restores the database from a specified backup snapshot."""
+    from utils.backup import restore_database_backup
+    try:
+        res = restore_database_backup(req.filename)
+        log_audit_event(
+            user=current_user,
+            action="DATABASE_RESTORED",
+            entity="system",
+            entity_id=0,
+            details={"restored_from": req.filename, "safety_snapshot": res.get("safety_snapshot")}
+        )
+        return res
+    except ValueError as ve:
+        raise HTTPException(400, str(ve))
+    except FileNotFoundError as fe:
+        raise HTTPException(404, str(fe))
+    except Exception as e:
+        raise HTTPException(500, f"Database restore failed: {str(e)}")

@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse
 from db.database import init_db, get_db
 from routes import auth, repairs, inventory, bills, ai, reports, notifications, feedback, shop, warranties, staff_mgmt, support
 from utils.qrcode_gen import generate_qr_base64
+from utils.logger import app_logger
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,11 +40,11 @@ async def lifespan(app: FastAPI):
         if user_count == 0:
             from db.seed import seed
             seed()
-            print("🌱 Auto-seeded initial demo accounts and inventory!")
+            app_logger.info("🌱 Auto-seeded initial demo accounts and inventory!")
     except Exception as e:
-        print(f"⚠️ Auto-seed notice: {e}")
+        app_logger.warning(f"⚠️ Auto-seed notice: {e}")
 
-    print("🚀 Mistri Enterprise API is running!")
+    app_logger.info("🚀 Mistri Enterprise API is running! Docs: /api/docs, Frontend: /")
     print("📖 API Docs: /api/docs")
     print("🌐 Frontend: /")
     yield

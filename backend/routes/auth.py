@@ -16,7 +16,7 @@ import secrets
 import time
 import urllib.parse
 from db.database import get_db
-from middleware.auth import SECRET_KEY, ALGORITHM, get_current_user
+from middleware.auth import SECRET_KEY, ALGORITHM, get_current_user, require_role
 from utils.audit import log_audit_event
 
 # Load environment variables from .env
@@ -112,6 +112,12 @@ class UserUpdate(BaseModel):
     name: str
     email: str
     phone: Optional[str] = None
+    address: Optional[str] = None
+    landmark: Optional[str] = None
+    pincode: Optional[str] = None
+    is_active: Optional[int] = None
+    monthly_salary: Optional[float] = None
+    joining_date: Optional[str] = None
     monthly_salary: Optional[float] = None
     is_active: Optional[int] = None
     address: Optional[str] = None
@@ -123,6 +129,13 @@ class CompleteProfileRequest(BaseModel):
     address: str
     landmark: Optional[str] = None
     pincode: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
 
 class StaffCreateRequest(BaseModel):
     name: str
@@ -477,12 +490,124 @@ def update_user(user_id: int, req: UserUpdate, current_user: dict = Depends(get_
         UPDATE users
         SET name=?, email=?, phone=?,
             monthly_salary=COALESCE(?, monthly_salary),
-            is_active=COALESCE(?, is_active)
+            is_active=COALESCE(?, is_active),
+            address=COALESCE(?, address),
+            landmark=COALESCE(?, landmark),
+            pincode=COALESCE(?, pincode),
+            joining_date=COALESCE(?, joining_date)
         WHERE id=?
-    """, (req.name.strip(), req.email.strip().lower(), req.phone, req.monthly_salary, req.is_active, user_id))
+    """, (
+        req.name.strip(),
+        req.email.strip().lower(),
+        req.phone,
+        req.monthly_salary,
+        req.is_active,
+        req.address,
+        req.landmark,
+        req.pincode,
+        req.joining_date,
+        user_id
+    ))
     conn.commit()
     conn.close()
     return {"message": "User updated successfully."}
+
+
+@router.post("/change-password")
+def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+    """Allow logged in user to change their password securely."""
+    conn = get_db()
+    user = conn.execute("SELECT password_hash FROM users WHERE id=?", (current_user["id"],)).fetchone()
+    if not user or not user["password_hash"]:
+        conn.close()
+        raise HTTPException(400, "User has no password set (e.g. Google-only account).")
+
+    if not _verify_pw(req.old_password, user["password_hash"]):
+        conn.close()
+        raise HTTPException(400, "Incorrect current password.")
+
+    validate_password_strength(req.new_password)
+    new_hash = _hash_pw(req.new_password)
+
+    conn.execute("UPDATE users SET password_hash=? WHERE id=?", (new_hash, current_user["id"]))
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        user=current_user,
+        action="PASSWORD_CHANGED",
+        entity="users",
+        entity_id=current_user["id"],
+        details={"user": current_user["email"]}
+    )
+    return {"message": "Password updated successfully."}
+
+
+@router.post("/users/{user_id}/reset-password")
+def admin_reset_password(user_id: int, req: AdminResetPasswordRequest, current_user: dict = Depends(require_role("admin"))):
+    """Admin resets any user's password with validation."""
+    validate_password_strength(req.new_password)
+    new_hash = _hash_pw(req.new_password)
+
+    conn = get_db()
+    u = conn.execute("SELECT id, name, email FROM users WHERE id=?", (user_id,)).fetchone()
+    if not u:
+        conn.close()
+        raise HTTPException(404, "User not found.")
+
+    conn.execute("UPDATE users SET password_hash=? WHERE id=?", (new_hash, user_id))
+    conn.commit()
+    conn.close()
+
+    log_audit_event(
+        user=current_user,
+        action="ADMIN_RESET_PASSWORD",
+        entity="users",
+        entity_id=user_id,
+        details={"target_user": u["email"]}
+    )
+    return {"message": f"Password for '{u['name']}' reset successfully."}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, reason: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    """Admin deactivates user with safeguards against self-deletion and removing the last admin."""
+    if current_user["role"] != "admin":
+        raise HTTPException(403, "Admins only.")
+    if current_user["id"] == user_id:
+        raise HTTPException(400, "Admin cannot deactivate their own account.")
+
+    conn = get_db()
+    u = conn.execute("SELECT id, name, role, is_active FROM users WHERE id=?", (user_id,)).fetchone()
+    if not u:
+        conn.close()
+        raise HTTPException(404, "User not found.")
+
+    # Guard against deactivating the last active admin
+    if u["role"] == "admin":
+        active_admins = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1 AND id!=?", (user_id,)).fetchone()[0]
+        if active_admins == 0:
+            conn.close()
+            raise HTTPException(400, "Cannot deactivate the last active administrator account.")
+
+    # Soft delete / deactivate user
+    conn.execute("UPDATE users SET is_active=0 WHERE id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    try:
+        log_audit_event(
+            user=current_user,
+            action="USER_DEACTIVATED_BY_ADMIN",
+            entity="users",
+            entity_id=user_id,
+            details={"name": u["name"], "role": u["role"], "reason": reason or "Administrative deactivation"}
+        )
+    except Exception:
+        pass
+
+    return {"message": f"User '{u['name']}' has been deactivated/archived."}
+
 
 # ---------------------------------------------------------------------------
 # Google OAuth 2.0 / OpenID Connect
@@ -819,3 +944,12 @@ def complete_profile(req: CompleteProfileRequest, current_user: dict = Depends(g
         "message": "Profile completed successfully.",
         "user": {k: v for k, v in dict(updated).items() if k not in ("password_hash",)}
     }
+
+@router.get("/customers")
+def list_customers(current_user: dict = Depends(require_role("admin"))):
+    conn = get_db()
+    customers = conn.execute(
+        "SELECT id, name, email, phone, address, landmark, pincode, is_active, created_at, auth_provider FROM users WHERE role='customer' ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(c) for c in customers]
