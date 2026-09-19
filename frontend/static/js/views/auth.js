@@ -56,14 +56,6 @@ function renderLandingPage() {
                     <div class="feature-desc">Separate dashboards for Admin, Technician, and Customer with secure role-based permissions.</div>
                 </div>
             </div>
-            <div style="margin-top:48px;text-align:center;color:var(--text-muted);font-size:0.85rem">
-                <div style="margin-bottom:8px;font-weight:600">Demo Login Credentials</div>
-                <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center">
-                    <span>🔴 <b>Admin:</b> admin@mistri.com / Admin@123</span>
-                    <span>🟡 <b>Staff:</b> raju@mistri.com / Staff@123</span>
-                    <span>🟢 <b>Customer:</b> arun@gmail.com / Customer@123</span>
-                </div>
-            </div>
         </div>
     `);
 }
@@ -154,12 +146,6 @@ async function handleLogin(e) {
         btn.innerHTML = '🔑 Sign In';
         btn.disabled = false;
     }
-}
-
-async function quickLogin(email, password) {
-    document.getElementById('login-email').value = email;
-    document.getElementById('login-password').value = password;
-    document.getElementById('login-btn').click();
 }
 
 function showGoogleOAuthConfigModal() {
