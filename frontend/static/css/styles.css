@@ -1139,6 +1139,18 @@ select.form-control {
     z-index: 0;
 }
 
+.timeline-progress-fill {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #10B981, #059669);
+    transform: translateY(-50%);
+    z-index: 0;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 2px;
+}
+
 .timeline-step {
     display: flex;
     flex-direction: column;
@@ -1171,6 +1183,8 @@ select.form-control {
 .timeline-dot.done {
     border-color: var(--success);
     background: var(--success);
+    color: #ffffff;
+    font-weight: bold;
     animation: checkmarkPop var(--anim-spring) forwards;
 }
 
@@ -2361,6 +2375,15 @@ body.mobile-nav-active {
         height: auto !important;
         transform: none !important;
         background: var(--border) !important;
+    }
+    .timeline-progress-fill {
+        top: 14px !important;
+        left: 21px !important;
+        width: 2px !important;
+        height: var(--prog, 0%) !important;
+        max-height: calc(100% - 28px) !important;
+        transform: none !important;
+        background: linear-gradient(180deg, #10B981, #059669) !important;
     }
     .timeline-step {
         display: flex !important;

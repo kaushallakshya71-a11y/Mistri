@@ -45,7 +45,7 @@ def validate_address(address: str, field_name: str = "Address") -> None:
 
 # Extended Professional Repair Lifecycle
 STATUS_FLOW = [
-    "Requested", "Assigned", "Diagnosing", "Approved", "Repairing", "Ready", "Delivered", "Completed"
+    "Requested", "Assigned", "Diagnosing", "Approved", "Repairing", "Ready", "Completed", "Delivered"
 ]
 EXCEPTION_STATUSES = ["Cancelled", "On Hold", "Rejected"]
 ALL_VALID_STATUSES = set(STATUS_FLOW + EXCEPTION_STATUSES + ["Received"])  # Support legacy "Received"
@@ -57,12 +57,12 @@ VALID_STATUS_TRANSITIONS = {
     "Diagnosing": {"Approved", "On Hold", "Cancelled", "Rejected"},
     "Approved": {"Repairing", "On Hold", "Cancelled"},
     "Repairing": {"Ready", "On Hold", "Cancelled"},
-    "Ready": {"Delivered", "Completed", "On Hold"},
+    "Ready": {"Completed", "Delivered", "On Hold"},
+    "Completed": {"Delivered", "Ready"},
     "Delivered": {"Completed"},
     "On Hold": {"Assigned", "Diagnosing", "Approved", "Repairing", "Ready", "Cancelled"},
     "Cancelled": set(),
-    "Rejected": set(),
-    "Completed": set()
+    "Rejected": set()
 }
 
 ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}

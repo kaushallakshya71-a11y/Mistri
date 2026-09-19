@@ -318,8 +318,22 @@ def record_cash_payment(bill_id: int, req: CashPaymentRequest, current_user: dic
     """, (bill_id, bill["total_amount"], cash_txn_id, current_user["id"], current_user["id"], notes))
     payment_id = cursor.lastrowid
 
-    # Update repair job to Completed
-    conn.execute("UPDATE repair_jobs SET status='Completed', updated_at=CURRENT_TIMESTAMP WHERE id=?", (bill["repair_job_id"],))
+    # Fetch previous repair job status
+    job = conn.execute("SELECT status FROM repair_jobs WHERE id=?", (bill["repair_job_id"],)).fetchone()
+    from_status = job["status"] if job else "Completed"
+
+    # Update repair job to Delivered
+    conn.execute("""
+        UPDATE repair_jobs 
+        SET status='Delivered', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP 
+        WHERE id=?
+    """, (bill["repair_job_id"],))
+
+    # Log in repair_status_history
+    conn.execute("""
+        INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+        VALUES (?, ?, 'Delivered', ?, ?)
+    """, (bill["repair_job_id"], from_status, current_user["id"], f"Cash payment collected ({cash_txn_id}). Device marked as Delivered."))
 
     # Activate 180-day warranty
     existing_war = conn.execute("SELECT id FROM warranties WHERE repair_job_id=?", (bill["repair_job_id"],)).fetchone()
@@ -332,8 +346,8 @@ def record_cash_payment(bill_id: int, req: CashPaymentRequest, current_user: dic
     # Notify customer
     conn.execute("""
         INSERT INTO notifications (user_id, repair_job_id, title, message)
-        VALUES (?, ?, 'Cash Payment Received 🎉', ?)
-    """, (bill["customer_id"], bill["repair_job_id"], f"Cash payment of ₹{bill['total_amount']:.2f} received by technician {current_user['name']}! Warranty is now active."))
+        VALUES (?, ?, 'Cash Payment Received & Delivered 🎉', ?)
+    """, (bill["customer_id"], bill["repair_job_id"], f"Cash payment of ₹{bill['total_amount']:.2f} received by technician {current_user['name']}! Device delivered and 180-day warranty is now active."))
 
     conn.commit()
     conn.close()
@@ -347,7 +361,7 @@ def record_cash_payment(bill_id: int, req: CashPaymentRequest, current_user: dic
     )
 
     return {
-        "message": "Cash payment recorded successfully",
+        "message": "Cash payment recorded successfully and device marked as Delivered",
         "bill_id": bill_id,
         "payment_status": "Paid",
         "collected_by": current_user["name"],
@@ -379,8 +393,22 @@ def verify_payment(bill_id: int, req: PaymentVerifyRequest, current_user: dict =
             WHERE bill_id=? AND status='Pending'
         """, (current_user["id"], req.notes or "Payment verified by Admin", bill_id))
 
-        # Complete repair job
-        conn.execute("UPDATE repair_jobs SET status='Completed', updated_at=CURRENT_TIMESTAMP WHERE id=?", (bill["repair_job_id"],))
+        # Fetch previous repair job status
+        job = conn.execute("SELECT status FROM repair_jobs WHERE id=?", (bill["repair_job_id"],)).fetchone()
+        from_status = job["status"] if job else "Completed"
+
+        # Update repair job to Delivered
+        conn.execute("""
+            UPDATE repair_jobs 
+            SET status='Delivered', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP 
+            WHERE id=?
+        """, (bill["repair_job_id"],))
+
+        # Log in repair_status_history so timeline updates reflect delivery
+        conn.execute("""
+            INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+            VALUES (?, ?, 'Delivered', ?, ?)
+        """, (bill["repair_job_id"], from_status, current_user["id"], f"Payment verified by Admin ({req.notes or 'Payment confirmed'}). Device marked as Delivered."))
 
         # Activate warranty
         existing_war = conn.execute("SELECT id FROM warranties WHERE repair_job_id=?", (bill["repair_job_id"],)).fetchone()
@@ -393,8 +421,8 @@ def verify_payment(bill_id: int, req: PaymentVerifyRequest, current_user: dict =
         # Customer notification
         conn.execute("""
             INSERT INTO notifications (user_id, repair_job_id, title, message)
-            VALUES (?, ?, 'Payment Approved 🎉', ?)
-        """, (bill["customer_id"], bill["repair_job_id"], f"Your payment of ₹{bill['total_amount']:.2f} has been verified by Admin. 180-day warranty is now active!"))
+            VALUES (?, ?, 'Payment Approved & Delivered 🎉', ?)
+        """, (bill["customer_id"], bill["repair_job_id"], f"Your payment of ₹{bill['total_amount']:.2f} has been verified by Admin. Your device is now marked Delivered and 180-day warranty is active!"))
 
     elif action == "Reject":
         if not req.notes or len(req.notes.strip()) < 3:
@@ -578,11 +606,30 @@ def download_invoice_pdf(bill_id: int, current_user: dict = Depends(get_current_
 @router.post("/{bill_id}/pay")
 def mark_paid(bill_id: int, current_user: dict = Depends(require_role("admin"))):
     conn = get_db()
+    bill = conn.execute("SELECT * FROM bills WHERE id=?", (bill_id,)).fetchone()
+    if not bill:
+        conn.close()
+        raise HTTPException(404, "Bill not found")
+
     conn.execute("UPDATE bills SET payment_status='Paid' WHERE id=?", (bill_id,))
-    conn.execute("INSERT INTO payments (bill_id, amount, payment_method) SELECT id, total_amount, 'Cash' FROM bills WHERE id=?", (bill_id,))
+    conn.execute("INSERT INTO payments (bill_id, amount, payment_method, status, verified_by, verified_at) VALUES (?, ?, 'Cash', 'Confirmed', ?, CURRENT_TIMESTAMP)", (bill_id, bill["total_amount"], current_user["id"]))
+
+    if bill["repair_job_id"]:
+        job = conn.execute("SELECT status FROM repair_jobs WHERE id=?", (bill["repair_job_id"],)).fetchone()
+        from_status = job["status"] if job else "Completed"
+        conn.execute("""
+            UPDATE repair_jobs 
+            SET status='Delivered', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP 
+            WHERE id=?
+        """, (bill["repair_job_id"],))
+        conn.execute("""
+            INSERT INTO repair_status_history (repair_job_id, from_status, to_status, changed_by, note)
+            VALUES (?, ?, 'Delivered', ?, 'Bill marked as Paid by Admin. Device marked as Delivered.')
+        """, (bill["repair_job_id"], from_status, current_user["id"]))
+
     conn.commit()
     conn.close()
-    return {"message": "Payment recorded"}
+    return {"message": "Payment recorded and device marked as Delivered"}
 
 def calculate_bill_totals(labour_charge: float, parts_cost: float, discount: float, tax_rate: float = 0.09):
     subtotal = round(float(labour_charge) + float(parts_cost), 2)

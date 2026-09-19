@@ -677,11 +677,12 @@ async function submitStatusUpdate(jobId) {
 async function renderAdminRepairDetail(jobId) {
     showLoading();
     try {
-        const [job, history, photos, warranty] = await Promise.all([
+        const [job, history, photos, warranty, bill] = await Promise.all([
             api.get(`/repairs/${jobId}`),
             api.get(`/repairs/${jobId}/history`).catch(() => []),
             api.get(`/repairs/${jobId}/photos`).catch(() => []),
-            api.get(`/warranties/repair/${jobId}`).catch(() => null)
+            api.get(`/warranties/repair/${jobId}`).catch(() => null),
+            api.get(`/bills`).then(bills => (Array.isArray(bills) ? bills.find(b => b.repair_job_id === Number(jobId)) : null)).catch(() => null)
         ]);
 
         setContent(`
@@ -705,6 +706,38 @@ async function renderAdminRepairDetail(jobId) {
                 <!-- Lifecycle Visual Timeline & Logs -->
                 <div class="card" style="margin-bottom:16px">
                     ${renderTimeline(job.status, history)}
+                </div>
+
+                <!-- Invoice & Payment Verification Card -->
+                <div class="card" style="margin-bottom:16px;border:1px solid ${bill && bill.payment_status === 'Paid' ? 'rgba(34,197,94,0.4)' : bill && bill.payment_status === 'Pending' ? 'rgba(234,179,8,0.4)' : 'var(--border)'}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+                        <div>
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:700">INVOICE & PAYMENT STATUS</div>
+                            ${bill ? `
+                                <div style="font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                    <span class="font-mono text-primary-color">${bill.bill_number}</span>
+                                    <span style="font-size:1.15rem;font-weight:700">${formatCurrency(bill.total_amount)}</span>
+                                    ${statusBadge(bill.payment_status)}
+                                    <span class="badge badge-assigned">${bill.payment_method || 'UPI/Cash'}</span>
+                                </div>
+                                ${bill.transaction_id ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">Txn ID / UTR: <span class="font-mono">${bill.transaction_id}</span></div>` : ''}
+                            ` : `
+                                <div style="font-size:0.85rem;color:var(--text-muted)">No invoice generated for this repair yet.</div>
+                            `}
+                        </div>
+                        <div class="flex gap-2 flex-wrap items-center">
+                            ${bill ? `
+                                <button onclick="api.download('/bills/${bill.id}/pdf', 'Invoice-${bill.bill_number}.pdf')" class="btn btn-outline btn-sm">⬇ Download Invoice</button>
+                                ${bill.payment_status === 'Pending' ? `
+                                    <button class="btn btn-success btn-sm" onclick="openVerifyPaymentModal(${bill.id}, '${bill.bill_number}', ${bill.total_amount}, '${bill.transaction_id || ''}', '${bill.payment_method || 'UPI'}', ${job.id})">
+                                        💳 Verify Payment (Approve & Deliver)
+                                    </button>
+                                ` : ''}
+                            ` : `
+                                <button class="btn btn-primary btn-sm" onclick="renderGenerateBill(${job.id})">📄 Generate Invoice</button>
+                            `}
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Rejection Banner if Rejected by Staff -->
@@ -802,9 +835,14 @@ async function renderAdminRepairDetail(jobId) {
                 </div>
 
                 <!-- Actions -->
-                <div class="flex gap-2 flex-wrap">
+                <div class="flex gap-2 flex-wrap items-center">
                     <button class="btn btn-outline" onclick="showQRCode('${job.repair_id}')">📱 QR Code</button>
-                    <button class="btn btn-primary" onclick="renderGenerateBill(${job.id})">📄 Generate Invoice</button>
+                    ${!bill ? `
+                        <button class="btn btn-primary" onclick="renderGenerateBill(${job.id})">📄 Generate Invoice</button>
+                    ` : ''}
+                    ${job.status !== 'Delivered' && !['Cancelled', 'Rejected'].includes(job.status) ? `
+                        <button class="btn btn-success" onclick="adminMarkDelivered(${job.id})">🚚 Mark as Delivered</button>
+                    ` : ''}
                     <button class="btn btn-outline" onclick='openAdminEditRepairModal(${JSON.stringify(job).replace(/'/g, "&apos;")})'>✏️ Edit Repair Details</button>
                     <button class="btn btn-danger" onclick="deleteRepairJob(${job.id}, '${job.repair_id}')">🗑️ Delete Repair</button>
                     ${!job.technician_name ? `
@@ -2299,7 +2337,7 @@ async function renderAdminBills(filterStatus = 'All') {
     }
 }
 
-function openVerifyPaymentModal(billId, billNumber, amount, txnId, method) {
+function openVerifyPaymentModal(billId, billNumber, amount, txnId, method, jobId = null) {
     showModal(`
         <div class="modal-header">
             <span class="modal-title">💳 Verify Customer Payment</span>
@@ -2318,20 +2356,46 @@ function openVerifyPaymentModal(billId, billNumber, amount, txnId, method) {
             <input type="text" class="form-control" id="verify-notes" placeholder="e.g. Confirmed in bank statement / GPay">
         </div>
         <div class="flex gap-2 flex-wrap" style="margin-top:16px">
-            <button class="btn btn-success flex-1" onclick="submitVerifyPayment(${billId}, 'Approve')">✅ Approve (Mark Paid)</button>
-            <button class="btn btn-danger flex-1" onclick="submitVerifyPayment(${billId}, 'Reject')">❌ Reject</button>
-            <button class="btn btn-outline flex-1" onclick="submitVerifyPayment(${billId}, 'Refund')">↩️ Refund</button>
+            <button class="btn btn-success flex-1" onclick="submitVerifyPayment(${billId}, 'Approve', ${jobId || 'null'})">✅ Approve (Mark Delivered)</button>
+            <button class="btn btn-danger flex-1" onclick="submitVerifyPayment(${billId}, 'Reject', ${jobId || 'null'})">❌ Reject</button>
+            <button class="btn btn-outline flex-1" onclick="submitVerifyPayment(${billId}, 'Refund', ${jobId || 'null'})">↩️ Refund</button>
         </div>
     `);
 }
 
-async function submitVerifyPayment(billId, action) {
+async function submitVerifyPayment(billId, action, jobId = null) {
     const notes = document.getElementById('verify-notes')?.value || '';
     try {
         const res = await api.post(`/bills/${billId}/verify-payment`, { action, notes });
-        showToast(res.message, 'success');
+        showToast(res.message || 'Payment verified & repair marked Delivered! 🎉', 'success');
         document.querySelector('.modal-overlay')?.remove();
-        renderAdminBills();
+        if (jobId) {
+            renderAdminRepairDetail(jobId);
+        } else if (router.currentPath && router.currentPath.startsWith('/admin/repairs/')) {
+            const parts = router.currentPath.split('/');
+            const id = parts[parts.length - 1];
+            if (id && !isNaN(id)) {
+                renderAdminRepairDetail(Number(id));
+            } else {
+                renderAdminBills();
+            }
+        } else {
+            renderAdminBills();
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function adminMarkDelivered(jobId) {
+    if (!confirm('Are you sure you want to mark this repair as Delivered?')) return;
+    try {
+        await api.put(`/repairs/${jobId}/status`, {
+            status: 'Delivered',
+            note: 'Appliance delivered to customer by Admin'
+        });
+        showToast('Repair marked as Delivered! 🎉', 'success');
+        renderAdminRepairDetail(jobId);
     } catch (e) {
         showToast(e.message, 'error');
     }

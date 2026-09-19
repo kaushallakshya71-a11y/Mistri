@@ -414,6 +414,12 @@ function renderTimeline(currentStatus, historyList = []) {
     const normalizedStatus = (currentStatus === 'Received') ? 'Requested' : currentStatus;
     const isException = ['Cancelled', 'On Hold', 'Rejected'].includes(normalizedStatus);
     const currentIdx = steps.indexOf(normalizedStatus);
+    const isDelivered = (normalizedStatus === 'Delivered');
+
+    let progressPct = 0;
+    if (!isException && currentIdx !== -1) {
+        progressPct = isDelivered ? 100 : Math.round((currentIdx / (steps.length - 1)) * 100);
+    }
 
     return `
         <div class="timeline-container">
@@ -423,17 +429,27 @@ function renderTimeline(currentStatus, historyList = []) {
                 </div>
             ` : ''}
             <div class="status-timeline">
+                <div class="timeline-progress-fill" style="width:${progressPct}%;--prog:${progressPct}%"></div>
                 ${steps.map((s, i) => {
-                    const isDone = (!isException && currentIdx !== -1 && i < currentIdx);
-                    const isActive = (!isException && i === currentIdx);
+                    const isDone = (!isException && currentIdx !== -1 && (isDelivered ? i <= currentIdx : i < currentIdx));
+                    const isActive = (!isException && !isDelivered && i === currentIdx);
+                    const stepClass = isDone ? 'done' : isActive ? 'active' : 'pending';
+
+                    let subtext = 'Pending';
+                    if (isDone) {
+                        subtext = (s === 'Delivered') ? 'Delivered 🎉' : 'Completed';
+                    } else if (isActive) {
+                        subtext = (s === 'Ready') ? 'Ready for Pickup' : 'In Progress';
+                    }
+
                     return `
-                        <div class="timeline-step ${isDone ? 'done' : isActive ? 'active' : 'pending'}">
-                            <div class="timeline-dot ${isDone ? 'done' : isActive ? 'active' : ''}">
+                        <div class="timeline-step ${stepClass}">
+                            <div class="timeline-dot ${stepClass}">
                                 ${isDone ? '✓' : getStatusIcon(s)}
                             </div>
                             <div class="timeline-content">
-                                <div class="timeline-label ${isDone ? 'done' : isActive ? 'active' : ''}">${s}</div>
-                                <div class="timeline-subtext">${isActive ? 'In Progress' : isDone ? 'Completed' : 'Pending'}</div>
+                                <div class="timeline-label ${stepClass}">${s}</div>
+                                <div class="timeline-subtext">${subtext}</div>
                             </div>
                         </div>
                     `;
@@ -444,7 +460,7 @@ function renderTimeline(currentStatus, historyList = []) {
                     <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase">Timeline Updates</div>
                     ${historyList.map(h => `
                         <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;padding:4px 0;border-bottom:1px dashed var(--border)">
-                            <div><span class="badge badge-received" style="font-size:0.68rem;padding:2px 6px">${h.to_status}</span> <span style="margin-left:4px">${h.note || ''}</span></div>
+                            <div><span class="badge ${h.to_status === 'Delivered' ? 'badge-delivered' : 'badge-received'}" style="font-size:0.68rem;padding:2px 6px">${h.to_status}</span> <span style="margin-left:4px">${h.note || ''}</span></div>
                             <span style="color:var(--text-muted);font-size:0.75rem">${formatDate(h.created_at)}</span>
                         </div>
                     `).join('')}
