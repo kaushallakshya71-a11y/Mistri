@@ -132,16 +132,6 @@ function renderLogin() {
                     <div class="auth-switch" style="margin-top:6px">
                         <a onclick="router.navigate('/')">← Back to home</a>
                     </div>
-
-                    <div class="divider"></div>
-                    <div style="font-size:0.75rem;color:var(--text-muted);text-align:center">
-                        <div style="font-weight:600;margin-bottom:6px">⚡ Quick Demo Login</div>
-                        <div style="display:flex;flex-direction:column;gap:5px">
-                            <a onclick="quickLogin('admin@mistri.com','Admin@123')" style="cursor:pointer;color:var(--danger)">🔴 Login as Admin</a>
-                            <a onclick="quickLogin('raju@mistri.com','Staff@123')" style="cursor:pointer;color:var(--warning)">🟡 Login as Staff</a>
-                            <a onclick="quickLogin('arun@gmail.com','Customer@123')" style="cursor:pointer;color:var(--success)">🟢 Login as Customer</a>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
