@@ -394,7 +394,7 @@ async function renderSubmitRepair() {
             <div class="card" style="margin-bottom:20px">
                 <div class="form-group" style="margin-bottom:16px">
                     <label class="form-label" style="font-weight:600">Service Mode / Delivery Preference</label>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div class="service-mode-grid">
                         <label style="display:flex;align-items:center;gap:10px;padding:12px;border:2px solid var(--primary);border-radius:var(--radius-sm);cursor:pointer;background:var(--surface-2)" id="mode-store-label">
                             <input type="radio" name="service_type" value="Store Drop-off" checked onchange="togglePickupFields(this.value)">
                             <div>

@@ -32,20 +32,20 @@
 
         <!-- Navbar -->
         <nav class="navbar" id="navbar" style="display:none">
-            <div class="navbar-brand">
+            <div class="navbar-brand" onclick="router.navigate('/')">
                 <span class="logo-icon">⚡</span>
                 <span class="logo-text">Mistri</span>
             </div>
             <div class="navbar-links" id="navbar-links"></div>
             <div class="navbar-actions">
-                <button class="notif-btn" id="notif-btn" title="Notifications">
+                <button class="notif-btn" id="notif-btn" title="Notifications" onclick="openNotifPanel()">
                     🔔 <span class="notif-badge" id="notif-badge" style="display:none">0</span>
                 </button>
                 <button class="theme-btn" id="theme-btn" title="Toggle theme">🌙</button>
-                <button class="btn btn-outline btn-sm" id="nav-logout-btn" onclick="logout()" title="Logout" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;font-size:0.85rem;color:var(--text-muted);border-color:var(--border)">
+                <button class="btn btn-outline btn-sm nav-desktop-only" id="nav-logout-btn" onclick="logout()" title="Logout" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;font-size:0.85rem;color:var(--text-muted);border-color:var(--border)">
                     🚪 Logout
                 </button>
-                <div class="user-menu">
+                <div class="user-menu nav-desktop-only">
                     <div class="user-avatar" id="user-avatar" onclick="toggleUserDropdown(event)">A</div>
                     <div class="user-dropdown" id="user-dropdown">
                         <div class="dropdown-name" id="dropdown-name"></div>
@@ -54,8 +54,42 @@
                         <button onclick="logout()">🚪 Logout</button>
                     </div>
                 </div>
+                <!-- Mobile Navigation Toggle Button -->
+                <button class="mobile-nav-toggle" id="mobile-nav-toggle" onclick="toggleMobileNav(event)" aria-label="Toggle Navigation Menu">
+                    <span id="mobile-nav-icon">☰</span>
+                </button>
             </div>
         </nav>
+
+        <!-- Mobile Navigation Drawer -->
+        <div class="mobile-nav-drawer" id="mobile-nav-drawer">
+            <div class="mobile-nav-header">
+                <div class="navbar-brand">
+                    <span class="logo-icon">⚡</span>
+                    <span class="logo-text">Mistri</span>
+                </div>
+                <button class="mobile-nav-close" onclick="closeMobileNav()" aria-label="Close navigation">✕</button>
+            </div>
+            <div class="mobile-nav-user" id="mobile-nav-user">
+                <div class="user-avatar" id="mobile-user-avatar">A</div>
+                <div class="mobile-user-info">
+                    <div class="mobile-user-name" id="mobile-user-name">User</div>
+                    <span class="badge" id="mobile-user-role-badge">Role</span>
+                </div>
+            </div>
+            <div class="mobile-nav-links" id="mobile-nav-links">
+                <!-- Injected dynamically by updateNavbar -->
+            </div>
+            <div class="mobile-nav-footer">
+                <button class="btn btn-outline w-full" id="mobile-theme-btn" onclick="toggleTheme()" style="margin-bottom:8px;justify-content:center">
+                    🌙 Toggle Dark/Light
+                </button>
+                <button class="btn btn-danger w-full" onclick="closeMobileNav(); logout();" style="justify-content:center">
+                    🚪 Logout
+                </button>
+            </div>
+        </div>
+        <div class="mobile-nav-overlay" id="mobile-nav-overlay" onclick="closeMobileNav()"></div>
 
         <!-- Notifications Panel -->
         <div class="notif-panel" id="notif-panel" style="display:none">

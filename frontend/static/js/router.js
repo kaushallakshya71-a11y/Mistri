@@ -56,11 +56,13 @@ const router = {
         }
 
         if (handler) {
+            closeMobileNav();
             this.currentPath = path;
             this._currentRoute = path;
             updateNavbar();
             handler(path);
         } else {
+            closeMobileNav();
             this.navigate('/', true);
         }
     },
@@ -133,15 +135,69 @@ function updateNavbar() {
     const userLinks = links[user.role] || [];
     const currentPath = router.currentPath;
 
-    linksEl.innerHTML = userLinks.map(l =>
-        l.isLogout ?
-        `<button class="nav-link" onclick="logout()" style="color:#ef4444;font-weight:700;margin-left:auto">${l.label}</button>` :
-        `<button class="nav-link ${currentPath === l.path ? 'active' : ''}" onclick="router.navigate('${l.path}')">${l.label}</button>`
-    ).join('');
+    // Desktop navbar links
+    if (linksEl) {
+        linksEl.innerHTML = userLinks.map(l =>
+            l.isLogout ?
+            `<button class="nav-link" onclick="logout()" style="color:#ef4444;font-weight:700;margin-left:auto">${l.label}</button>` :
+            `<button class="nav-link ${currentPath === l.path ? 'active' : ''}" onclick="router.navigate('${l.path}')">${l.label}</button>`
+        ).join('');
+    }
+
+    // Mobile drawer navigation links
+    const mobileLinksEl = document.getElementById('mobile-nav-links');
+    if (mobileLinksEl) {
+        mobileLinksEl.innerHTML = userLinks.filter(l => !l.isLogout).map(l =>
+            `<button class="mobile-nav-link ${currentPath === l.path ? 'active' : ''}" onclick="closeMobileNav(); router.navigate('${l.path}')">
+                <span>${l.label}</span>
+                <span class="mobile-nav-arrow">›</span>
+            </button>`
+        ).join('');
+    }
+
+    // Mobile user profile header
+    const mobAvatar = document.getElementById('mobile-user-avatar');
+    if (mobAvatar) mobAvatar.textContent = user.name?.[0]?.toUpperCase() || 'U';
+    const mobName = document.getElementById('mobile-user-name');
+    if (mobName) mobName.textContent = user.name;
+    const mobBadge = document.getElementById('mobile-user-role-badge');
+    if (mobBadge) {
+        mobBadge.textContent = (user.role || 'user').toUpperCase();
+        mobBadge.className = `badge badge-${user.role || 'customer'}`;
+    }
 
     // Load notifications count
     loadNotifCount();
 }
+
+function openMobileNav() {
+    const drawer = document.getElementById('mobile-nav-drawer');
+    const overlay = document.getElementById('mobile-nav-overlay');
+    if (drawer) drawer.classList.add('open');
+    if (overlay) overlay.classList.add('open');
+    document.body.classList.add('mobile-nav-active');
+}
+
+function closeMobileNav() {
+    const drawer = document.getElementById('mobile-nav-drawer');
+    const overlay = document.getElementById('mobile-nav-overlay');
+    if (drawer) drawer.classList.remove('open');
+    if (overlay) overlay.classList.remove('open');
+    document.body.classList.remove('mobile-nav-active');
+}
+
+function toggleMobileNav(event) {
+    if (event) event.stopPropagation();
+    const drawer = document.getElementById('mobile-nav-drawer');
+    if (drawer && drawer.classList.contains('open')) {
+        closeMobileNav();
+    } else {
+        openMobileNav();
+    }
+}
+window.openMobileNav = openMobileNav;
+window.closeMobileNav = closeMobileNav;
+window.toggleMobileNav = toggleMobileNav;
 
 async function loadNotifCount() {
     try {
@@ -366,16 +422,19 @@ function renderTimeline(currentStatus, historyList = []) {
                     ${getStatusIcon(normalizedStatus)} Status: ${normalizedStatus}
                 </div>
             ` : ''}
-            <div class="status-timeline" style="overflow-x:auto;padding-bottom:8px">
+            <div class="status-timeline">
                 ${steps.map((s, i) => {
                     const isDone = (!isException && currentIdx !== -1 && i < currentIdx);
                     const isActive = (!isException && i === currentIdx);
                     return `
-                        <div class="timeline-step">
+                        <div class="timeline-step ${isDone ? 'done' : isActive ? 'active' : 'pending'}">
                             <div class="timeline-dot ${isDone ? 'done' : isActive ? 'active' : ''}">
                                 ${isDone ? '✓' : getStatusIcon(s)}
                             </div>
-                            <div class="timeline-label ${isDone ? 'done' : isActive ? 'active' : ''}">${s}</div>
+                            <div class="timeline-content">
+                                <div class="timeline-label ${isDone ? 'done' : isActive ? 'active' : ''}">${s}</div>
+                                <div class="timeline-subtext">${isActive ? 'In Progress' : isDone ? 'Completed' : 'Pending'}</div>
+                            </div>
                         </div>
                     `;
                 }).join('')}

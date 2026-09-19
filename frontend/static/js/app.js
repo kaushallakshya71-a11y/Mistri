@@ -46,18 +46,37 @@ router.register('/shop/orders', renderMyOrders);
 router.register('/shop/admin', renderAdminShop);
 
 // Theme toggle
-const themeBtn = document.getElementById('theme-btn');
-const savedTheme = localStorage.getItem('mistri_theme') || 'dark';
-document.documentElement.setAttribute('data-theme', savedTheme);
-themeBtn.textContent = savedTheme === 'dark' ? '☀️' : '🌙';
-
-themeBtn.addEventListener('click', () => {
-    const current = document.documentElement.getAttribute('data-theme');
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
     const next = current === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('mistri_theme', next);
-    themeBtn.textContent = next === 'dark' ? '☀️' : '🌙';
+    updateThemeButtons(next);
     window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme: next } }));
+}
+window.toggleTheme = toggleTheme;
+
+function updateThemeButtons(theme) {
+    const themeBtn = document.getElementById('theme-btn');
+    if (themeBtn) themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const mobThemeBtn = document.getElementById('mobile-theme-btn');
+    if (mobThemeBtn) mobThemeBtn.innerHTML = theme === 'dark' ? '☀️ Switch to Light Mode' : '🌙 Switch to Dark Mode';
+}
+
+const savedTheme = localStorage.getItem('mistri_theme') || 'dark';
+document.documentElement.setAttribute('data-theme', savedTheme);
+updateThemeButtons(savedTheme);
+
+const themeBtn = document.getElementById('theme-btn');
+if (themeBtn) {
+    themeBtn.addEventListener('click', toggleTheme);
+}
+
+// Close mobile nav on Escape
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (typeof closeMobileNav === 'function') closeMobileNav();
+    }
 });
 
 // Notification button
