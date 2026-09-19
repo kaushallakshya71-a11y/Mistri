@@ -29,6 +29,46 @@ def get_db_ctx():
     finally:
         conn.close()
 
+def ensure_default_users(cursor=None):
+    """Guarantees essential seed accounts exist in the database (admin, staff, customer)."""
+    close_after = False
+    if cursor is None:
+        conn = get_db()
+        cursor = conn.cursor()
+        close_after = True
+    try:
+        admin_row = cursor.execute("SELECT id FROM users WHERE email='admin@mistri.com'").fetchone()
+        if not admin_row:
+            import bcrypt as _bcrypt
+            def _hpw(pwd: str) -> str:
+                return _bcrypt.hashpw(pwd.encode(), _bcrypt.gensalt()).decode()
+
+            admin_pwd = _hpw("Admin@123")
+            staff_pwd = _hpw("Staff@123")
+            cust_pwd = _hpw("Customer@123")
+
+            default_users = [
+                ("Admin Owner", "admin@mistri.com", "9800000001", admin_pwd, "admin", 0),
+                ("Raju Technician", "raju@mistri.com", "9800000002", staff_pwd, "staff", 20000),
+                ("Priya Singh", "priya@mistri.com", "9800000003", staff_pwd, "staff", 22000),
+                ("Arun Kumar", "arun@gmail.com", "9900000001", cust_pwd, "customer", 0),
+                ("Arun Kumar", "arun@example.com", "9900000001", cust_pwd, "customer", 0),
+                ("Meena Patel", "meena@example.com", "9900000002", cust_pwd, "customer", 0),
+                ("Vikram Sharma", "vikram@example.com", "9900000003", cust_pwd, "customer", 0),
+            ]
+            for name, email, phone, p_hash, role, salary in default_users:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO users (name, email, phone, password_hash, role, auth_provider, is_active, monthly_salary, joining_date)
+                    VALUES (?, ?, ?, ?, ?, 'email', 1, ?, DATE('now'))
+                """, (name, email, phone, p_hash, role, salary))
+            if close_after:
+                conn.commit()
+    except Exception as e:
+        print(f"Notice ensuring default users: {e}")
+    finally:
+        if close_after:
+            conn.close()
+
 def init_db():
     """Initialize all database tables with multi-tenant shop support and professional features."""
     conn = get_db()
@@ -607,15 +647,8 @@ def init_db():
     except Exception:
         pass
 
-    # Ensure demo customer arun@gmail.com is available alongside arun@example.com
-    try:
-        cursor.execute("""
-            INSERT OR IGNORE INTO users (name, email, phone, password_hash, role, auth_provider)
-            SELECT name, 'arun@gmail.com', phone, password_hash, role, auth_provider
-            FROM users WHERE email = 'arun@example.com'
-        """)
-    except Exception:
-        pass
+    # Ensure core demo users (Admin, Staff, Customer) exist
+    ensure_default_users(cursor)
     # Seed initial festival offers
     try:
         offer_count = cursor.execute("SELECT COUNT(*) FROM customer_offers").fetchone()[0]

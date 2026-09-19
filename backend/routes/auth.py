@@ -224,6 +224,15 @@ def login(req: LoginRequest):
     conn.close()
 
     if not user:
+        clean_email = req.email.strip().lower()
+        if clean_email in ("admin@mistri.com", "raju@mistri.com", "priya@mistri.com", "arun@gmail.com", "arun@example.com"):
+            from db.database import ensure_default_users
+            ensure_default_users()
+            conn = get_db()
+            user = conn.execute("SELECT * FROM users WHERE email = ?", (clean_email,)).fetchone()
+            conn.close()
+
+    if not user:
         raise HTTPException(401, "Email address not found. Please register or check your email.")
 
     # Check if deactivated

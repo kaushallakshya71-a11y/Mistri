@@ -29,16 +29,29 @@ def seed():
     conn = get_db()
     c = conn.cursor()
 
-    # Clear existing data
-    for table in ['payments','bills','notifications','repair_jobs','inventory','devices','users']:
-        c.execute(f"DELETE FROM {table}")
+    # Clear existing data safely by temporarily disabling foreign keys
+    c.execute("PRAGMA foreign_keys = OFF")
+    tables_to_clear = [
+        'warranty_claims', 'repair_item_warranties', 'warranties', 'payments', 
+        'offer_redemptions', 'bills', 'support_ticket_messages', 'support_tickets',
+        'repair_photos', 'repair_status_history', 'repair_jobs', 'devices',
+        'inventory_transactions', 'inventory', 'staff_bonuses', 'staff_leaves',
+        'feedback', 'audit_logs', 'notifications', 'users'
+    ]
+    for table in tables_to_clear:
+        try:
+            c.execute(f"DELETE FROM {table}")
+        except Exception:
+            pass
     conn.commit()
+    c.execute("PRAGMA foreign_keys = ON")
 
     # --- USERS ---
     users = [
         ("Admin Owner", "admin@mistri.com", "9800000001", hash_password("Admin@123"), "admin"),
         ("Raju Technician", "raju@mistri.com", "9800000002", hash_password("Staff@123"), "staff"),
         ("Priya Singh", "priya@mistri.com", "9800000003", hash_password("Staff@123"), "staff"),
+        ("Arun Kumar", "arun@gmail.com", "9900000001", hash_password("Customer@123"), "customer"),
         ("Arun Kumar", "arun@example.com", "9900000001", hash_password("Customer@123"), "customer"),
         ("Meena Patel", "meena@example.com", "9900000002", hash_password("Customer@123"), "customer"),
         ("Vikram Sharma", "vikram@example.com", "9900000003", hash_password("Customer@123"), "customer"),
