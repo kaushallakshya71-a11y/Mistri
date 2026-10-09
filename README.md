@@ -48,6 +48,22 @@
 
 ---
 
+## 📸 Screenshots
+
+| Admin Dashboard (Dark Mode) | Admin Dashboard (Light Mode) |
+|:---:|:---:|
+| <img src="docs/screenshots/admin_dashboard_dark.png" alt="Admin Dashboard Dark" width="100%"/> | <img src="docs/screenshots/admin_dashboard_light.png" alt="Admin Dashboard Light" width="100%"/> |
+
+| Technician / Staff Portal | Customer Dashboard |
+|:---:|:---:|
+| <img src="docs/screenshots/staff_dashboard.png" alt="Technician Portal" width="100%"/> | <img src="docs/screenshots/customer_dashboard.png" alt="Customer Dashboard" width="100%"/> |
+
+| Authentication & Registration |
+|:---:|
+| <img src="docs/screenshots/register_page.png" alt="Registration Screen" width="100%"/> |
+
+---
+
 ## 🏗️ Architecture
 
 ```
